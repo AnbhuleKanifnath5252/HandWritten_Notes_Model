@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Large Model weights & checkpoints (CRITICAL: GitHub rejects files > 100MB)
+models/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+*.gguf
+.cache/
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+env/
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Logs and outputs
+*.log
+transcribed_notes*.md
+temp/
