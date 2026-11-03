@@ -486,14 +486,15 @@ def export_markdown_file(markdown_text):
 # =====================================================================
 # Gradio Modern Frontend
 # =====================================================================
-def create_ui():
-    custom_css = """
-    #main-title { text-align: center; margin-bottom: 4px; font-weight: 700; }
-    #subtitle { text-align: center; color: #4b5563; margin-bottom: 18px; font-size: 1.05em; }
-    .status-box { font-weight: 600; padding: 8px 12px; border-radius: 6px; background: #f3f4f6; }
-    """
+CUSTOM_CSS = """
+#main-title { text-align: center; margin-bottom: 4px; font-weight: 700; }
+#subtitle { text-align: center; color: #4b5563; margin-bottom: 18px; font-size: 1.05em; }
+.status-box { font-weight: 600; padding: 8px 12px; border-radius: 6px; background: #f3f4f6; }
+"""
 
-    with gr.Blocks(title="Handwritten Notes Studio: PaddleOCR-VL + Qwen2.5-VL", css=custom_css) as demo:
+def create_ui():
+
+    with gr.Blocks(title="Handwritten Notes Studio: PaddleOCR-VL + Qwen2.5-VL") as demo:
         gr.Markdown("# ✍️ High-Accuracy Handwritten Notes Studio", elem_id="main-title")
         gr.Markdown(
             "Dual-Model Background Engine: **PaddleOCR-VL** (Optical Detection) + **Qwen2.5-VL** (Visual Reasoning) | **Scanned PDFs & Images**",
@@ -521,7 +522,7 @@ def create_ui():
                         )
                     with gr.Row():
                         page_slider = gr.Slider(
-                            minimum=1, maximum=1, step=1, value=1, label="Page Selector", interactive=False
+                            minimum=1, maximum=10, step=1, value=1, label="Page Selector", interactive=False
                         )
                         pdf_dpi = gr.Slider(
                             minimum=100, maximum=300, step=25, value=175, label="Rendering DPI (Quality)"
@@ -624,13 +625,14 @@ def create_ui():
         def on_pdf_uploaded(file, dpi, enhance):
             pdf_path = get_pdf_path(file)
             if not pdf_path:
-                return gr.update(maximum=1, value=1, interactive=False), "No PDF loaded", None
+                return gr.update(minimum=1, maximum=10, value=1, interactive=False), "No PDF loaded", None
             total = get_pdf_page_count(pdf_path)
             if total == 0:
-                return gr.update(maximum=1, value=1, interactive=False), "⚠️ Invalid or empty PDF", None
+                return gr.update(minimum=1, maximum=10, value=1, interactive=False), "⚠️ Invalid or empty PDF", None
             preview = render_pdf_page(pdf_path, 0, dpi=int(dpi), enhance=enhance)
+            slider_max = max(2, total)
             return (
-                gr.update(minimum=1, maximum=total, value=1, interactive=(total > 1)),
+                gr.update(minimum=1, maximum=slider_max, value=1, interactive=(total > 1)),
                 f"✅ **Loaded PDF:** {total} page(s)",
                 preview
             )
@@ -737,4 +739,4 @@ if __name__ == "__main__":
     demo = create_ui()
     # Launch with queue enabled so background streaming works seamlessly
     demo.queue()
-    demo.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True)
+    demo.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True, css=CUSTOM_CSS)
