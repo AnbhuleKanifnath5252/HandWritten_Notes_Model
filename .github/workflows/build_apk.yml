@@ -49,3 +49,4 @@ jobs:
           name: Handwritten-Notes-Studio-Debug-APK
           path: mobile_app/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
+

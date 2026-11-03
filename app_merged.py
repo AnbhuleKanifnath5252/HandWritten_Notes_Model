@@ -262,9 +262,8 @@ def render_pdf_page(pdf_path, page_number=0, dpi=150, enhance=True):
             page_number = 0
         page = doc[page_number]
         pix = page.get_pixmap(dpi=int(dpi or 150))
-        if pix.alpha:
-            pix = pymupdf.Pixmap(pix, 0)
-        img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        # Universal & crash-proof conversion for Grayscale, CMYK, and RGB pages
+        img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
         doc.close()
 
         # Prevent browser payload and memory crashes on giant scans
