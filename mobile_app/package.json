@@ -1,0 +1,19 @@
+{
+  "name": "handwritten-notes-studio-mobile",
+  "version": "2.0.0",
+  "description": "Mobile APK scanner for Marathi & English Handwritten Notes",
+  "main": "index.js",
+  "scripts": {
+    "build": "echo 'Assets in www are ready'",
+    "cap:add": "npx cap add android",
+    "cap:sync": "npx cap sync",
+    "cap:open": "npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.0.0",
+    "@capacitor/android": "^6.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0"
+  }
+}

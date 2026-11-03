@@ -1,4 +1,93 @@
+# ✍️ Universal Handwritten Notes Studio (मराठी & English Bilingual)
+### Powered by PaddleOCR-VL (Optical Recognition) + Qwen2.5-VL (Visual Reasoning)
+
+[![GitHub Repo](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/AnbhuleKanifnath5252/HandWritten_Notes_Model)
+[![OpenAI API](https://img.shields.io/badge/OpenAI_API-Compatible-green?logo=openai)](http://127.0.0.1:8000/docs)
+[![Android APK](https://img.shields.io/badge/Android-APK_%26_PWA-brightgreen?logo=android)](https://github.com/AnbhuleKanifnath5252/HandWritten_Notes_Model/actions)
+[![Language](https://img.shields.io/badge/Bilingual-मराठी_|_English-orange)]()
+
+---
+
+## 🌟 Key Features
+
+1. **Universal File Ingestion ➔ Standard PDF**:
+   - Accepts **ANY file format**: Scanned PDF, Images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tiff`, `.tif`, `.gif`), Microsoft Word (`.docx`, `.doc`), Plain Text, Markdown, CSV, TSV, and Source Code (`.txt`, `.md`, `.py`, `.json`, etc.).
+   - Automatically standardizes multi-page documents into a crisp, paginated standard PDF with instant multi-page preview.
+
+2. **Bilingual Marathi (मराठी) & English Handwriting Recognition**:
+   - **Devanagari Script (देवनागरी)**: Accurately transcribes Marathi vowels, consonants, matras (काना, वेलांटी, उकार, मात्रा, अनुस्वार), conjuncts (जोडअक्षरे जसे की 'प्र', 'त्र', 'ज्ञ', 'क्ष', 'द्ध', 'ष्ट', 'ण्य', 'रफार'), and Marathi numerals (०-९).
+   - **Standard Typewriting Format (प्रमाणित टंकलेखन)**: Converts hasty, ambiguous notes into publication-grade typewritten format with clear headings (`#`, `##`), structured bullet points, aligned Markdown tables, and LaTeX formulas ($...$ and $$...$$).
+   - **Indic Typography**: Native ReportLab PDF export with `Nirmala.ttc` ensures Marathi characters render crisply without missing matras or font distortion.
+
+3. **OpenAI-Compatible REST API Server (`openai_api_server.py`)**:
+   - Fully implements OpenAI's official `/v1/chat/completions` API (streaming SSE + JSON).
+   - Compatible with the official OpenAI Python SDK (`OpenAI(base_url="http://localhost:8000/v1")`), LangChain, and any mobile app.
+   - Multimodal vision support (Base64 data URLs and image URLs).
+   - Endpoints:
+     - `POST /v1/chat/completions` — Vision & Text Chat Completions
+     - `GET /v1/models` — Model Catalog
+     - `POST /v1/documents/convert` — Universal file to PDF converter
+     - `POST /v1/documents/export-pdf` — Markdown to Publication-grade Bilingual PDF
+     - `GET /docs` — Interactive OpenAPI Swagger UI
+
+4. **Mobile Android APK & PWA Suite (`mobile_app/`)**:
+   - **Instant 1-Tap Mobile Install (WebAPK / PWA)**: Open `http://<PC_IP>:8000` on Android Chrome/Edge, tap *"Install App"* / *"Add to Home screen"* to get a native Android app icon with hardware camera scanning!
+   - **Cloud APK Builder via GitHub Actions**: Pre-configured workflow (`.github/workflows/build_apk.yml`) compiles `app-debug.apk` in the cloud on every push.
+   - **Native Capacitor Project**: Full source code in `mobile_app/` with camera permissions (`AndroidManifest.xml`).
+
+---
+
+## 🚀 Quick Start Guide
+
+### 1. Launch the Web Studio (Gradio UI)
+```bash
+# Direct launch
+python app_merged.py
+
+# Or launch with auto-restart watchdog
+python watch_server.py
+```
+Open your browser at: **`http://127.0.0.1:7860`**
+
+### 2. Launch the OpenAI-Compatible API Server
+```bash
+python openai_api_server.py
+```
+- API Endpoint: **`http://127.0.0.1:8000/v1/chat/completions`**
+- Mobile Web Scanner: **`http://127.0.0.1:8000/`**
+- Interactive Swagger Docs: **`http://127.0.0.1:8000/docs`**
+
+### 3. Connect from Python using Official OpenAI SDK
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="sk-local")
+
+response = client.chat.completions.create(
+    model="handwritten-bilingual",
+    messages=[{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Transcribe this note in Marathi and English into standard typewritten format."},
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+        ]
+    }],
+    stream=False
+)
+print(response.choices[0].message.content)
+```
+
+### 4. Install the Mobile Scanner on Android Phone (APK / PWA)
+1. Ensure your phone and PC are connected to the same Wi-Fi.
+2. Find your PC's IP address (e.g. `192.168.1.5` using `ipconfig`).
+3. Open `http://192.168.1.5:8000` in Chrome on your phone.
+4. Tap the menu (⋮) ➔ **"Install app"** or **"Add to Home screen"**.
+5. Use your phone's camera to snap handwritten notes, stream the live transcription, and download publication-grade PDFs directly!
+
+---
+
 # Qwen3-VL
+
 
 
 <p align="center">

@@ -1,0 +1,22 @@
+{
+  "name": "Handwritten Notes Studio (Marathi & English)",
+  "short_name": "NotesStudio",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#2563eb",
+  "description": "Universal Handwritten Notes Scanner & Standard Typewriting Converter for Marathi & English.",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

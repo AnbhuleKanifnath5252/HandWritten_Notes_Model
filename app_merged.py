@@ -45,6 +45,35 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+import re
+
+# =====================================================================
+# Font Registration for Indic (Marathi / Devanagari) + English PDF Export
+# =====================================================================
+INDIC_FONT_NAME = "Helvetica"
+INDIC_FONT_BOLD = "Helvetica-Bold"
+
+try:
+    windows_fonts = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts")
+    nirmala_path = os.path.join(windows_fonts, "Nirmala.ttc")
+    if os.path.exists(nirmala_path):
+        pdfmetrics.registerFont(TTFont("Nirmala", nirmala_path, subfontIndex=0))
+        pdfmetrics.registerFont(TTFont("NirmalaBold", nirmala_path, subfontIndex=1))
+        INDIC_FONT_NAME = "Nirmala"
+        INDIC_FONT_BOLD = "NirmalaBold"
+        print("[Font Setup] Successfully registered Nirmala TTC for Marathi Devanagari + English typography.")
+    else:
+        mangal_path = os.path.join(windows_fonts, "mangal.ttf")
+        if os.path.exists(mangal_path):
+            pdfmetrics.registerFont(TTFont("Mangal", mangal_path))
+            INDIC_FONT_NAME = "Mangal"
+            INDIC_FONT_BOLD = "Mangal"
+            print("[Font Setup] Successfully registered Mangal TTF for Marathi Devanagari typography.")
+except Exception as fe:
+    print(f"[Font Setup Warning] Could not register Indic font, falling back to Helvetica: {fe}")
+
 
 # Ensure local qwen-vl-utils is found
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -94,8 +123,8 @@ def get_file_path(file_obj):
 
 def convert_any_file_to_standard_pdf(file_path):
     """
-    Accepts ANY file format (PDF, PNG, JPG, WEBP, TIFF, BMP, DOCX, TXT, MD)
-    and normalizes it into a standard PDF file path.
+    Accepts ANY file format (PDF, PNG, JPG, WEBP, TIFF, BMP, GIF, ICO, DOCX, TXT, MD, CSV, JSON, Code, etc.)
+    and normalizes it into a standard, paginated PDF file path.
     """
     if not file_path or not os.path.exists(file_path):
         return None
@@ -108,8 +137,8 @@ def convert_any_file_to_standard_pdf(file_path):
     if ext == ".pdf":
         return file_path
 
-    # 2. Images (Single & Multi-page TIFF, PNG, JPG, BMP, WEBP)
-    if ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif"]:
+    # 2. All Image Formats (Single & Multi-page TIFF, PNG, JPG, JPEG, WEBP, BMP, GIF, ICO, PPM, etc.)
+    if ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif", ".gif", ".ico", ".ppm", ".pgm", ".pbm"]:
         try:
             im = Image.open(file_path)
             frames = []
@@ -120,8 +149,10 @@ def convert_any_file_to_standard_pdf(file_path):
             except EOFError:
                 pass
 
-            if frames:
+            if len(frames) > 1:
                 frames[0].save(out_pdf_path, "PDF", resolution=150.0, save_all=True, append_images=frames[1:])
+            elif frames:
+                frames[0].save(out_pdf_path, "PDF", resolution=150.0)
             else:
                 im.convert("RGB").save(out_pdf_path, "PDF", resolution=150.0)
             return out_pdf_path
@@ -138,13 +169,13 @@ def convert_any_file_to_standard_pdf(file_path):
                 print(f"Image conversion error: {e2}")
                 return None
 
-    # 3. Word Documents (.docx)
+    # 3. Word Documents (.docx, .doc)
     if ext in [".docx", ".doc"] and HAS_DOCX:
         try:
             doc = docx.Document(file_path)
             styles = getSampleStyleSheet()
-            h1 = ParagraphStyle('H1', parent=styles['Heading1'], fontSize=16, spaceAfter=8, textColor=colors.HexColor('#1e40af'))
-            body = ParagraphStyle('Body', parent=styles['Normal'], fontSize=10, leading=14, spaceAfter=4)
+            h1 = ParagraphStyle('H1', parent=styles['Heading1'], fontName=INDIC_FONT_BOLD, fontSize=16, spaceAfter=8, textColor=colors.HexColor('#1e40af'))
+            body = ParagraphStyle('Body', parent=styles['Normal'], fontName=INDIC_FONT_NAME, fontSize=10, leading=15, spaceAfter=4)
 
             story = []
             for para in doc.paragraphs:
@@ -163,16 +194,21 @@ def convert_any_file_to_standard_pdf(file_path):
         except Exception as e:
             print(f"DOCX to PDF conversion error: {e}")
 
-    # 4. Plain Text & Markdown (.txt, .md, .csv, .log)
-    if ext in [".txt", ".md", ".csv", ".log"]:
+    # 4. Plain Text, Markdown, CSV, TSV, Code & Data files (.txt, .md, .csv, .tsv, .json, .xml, .yaml, .yml, .py, .java, .cpp, .c, .html, .log, etc.)
+    text_extensions = [
+        ".txt", ".md", ".csv", ".tsv", ".log", ".json", ".xml", ".yaml", ".yml",
+        ".py", ".js", ".ts", ".html", ".htm", ".css", ".java", ".c", ".cpp",
+        ".h", ".sql", ".ini", ".cfg", ".sh", ".bat", ".ps1", ".rtf"
+    ]
+    if ext in text_extensions:
         try:
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
             return export_standard_pdf(content, out_pdf_path)
         except Exception as e:
-            print(f"Text to PDF conversion error: {e}")
+            print(f"Text/code to PDF conversion error: {e}")
 
-    # 5. Generic PyMuPDF fallback for other supported document formats (XPS, EPUB, etc.)
+    # 5. Generic PyMuPDF fallback for other document formats (XPS, EPUB, MOBI, SVG, etc.)
     try:
         generic_doc = pymupdf.open(file_path)
         pdf_bytes = generic_doc.convert_to_pdf()
@@ -328,8 +364,56 @@ def reload_models(paddle_path, qwen_path):
 
 
 # =====================================================================
-# High-Accuracy Prompts
+# High-Accuracy Prompts (Marathi + English Bilingual & General)
 # =====================================================================
+MARATHI_ENGLISH_PROMPT_TEMPLATE = """You are an elite bilingual handwriting transcription specialist, expert in Marathi (मराठी - देवनागरी लिपी) and English handwritten documents, academic lecture notes, and official papers.
+
+PRIMARY INPUTS:
+1. Visual scan of the handwritten note/document.
+2. Raw optical characters & formula extract from PaddleOCR-VL:
+--- RAW OCR EXTRACT ---
+{paddle_text}
+--- END RAW OCR EXTRACT ---
+
+USER SPECIFIC INSTRUCTIONS:
+{user_prompt}
+
+STRICT BILINGUAL & STANDARD TYPEWRITING CONVERSION RULES:
+1. MARATHI (मराठी) LANGUAGE ACCURACY:
+   - Faithfully transcribe all Marathi handwritten text in standard Devanagari script (मराठी देवनागरी लिपी).
+   - Accurately reproduce all conjuncts (जोडअक्षरे: जसे की प्र, त्र, ज्ञ, क्ष, द्ध, ष्ट, ण्य, ळ्ळ, रफार).
+   - Preserve all matras, kanas, velantis, and ukaars (काना, र्‍हस्व/दीर्घ वेलांटी, उकार, मात्रा, अनुस्वार).
+   - Follow standard Marathi orthography and grammar rules (महाराष्ट्र राज्य साहित्य महामंडळाचे अधिकृत शुद्धलेखन नियम).
+   - Recognize Marathi numerals (०, १, २, ३, ४, ५, ६, ७, ८, ९) or Arabic numerals (0-9) exactly as written.
+
+2. ENGLISH LANGUAGE ACCURACY:
+   - Accurately transcribe all English cursive, print, and mixed handwriting.
+   - Resolve ambiguous letter shapes based on surrounding context (e.g., distinguishing '0' vs 'O', '1' vs 'l' vs 'I', '5' vs 'S', 'q' vs 'g').
+   - Keep technical terms, acronyms, and scientific names in standard English.
+
+3. CONVERSION TO "STANDARD TYPEWRITING FORMAT" (प्रमाणित टंकलेखन स्वरूप):
+   - Convert messy, hasty, or slanted handwriting into clean, formal, publication-ready typewritten text.
+   - Use clear hierarchical Markdown headings:
+     # मुख्य शीर्षक (Main Title)
+     ## उपशीर्षक (Section / Topic)
+     ### तपशील (Subtopic / Subsection)
+   - Format definitions, key points, and summaries with clear bullet points (- ) or numbered lists (1. , 2. ).
+   - If handwritten text includes tabular data, format it into an aligned Markdown table:
+     | अनुक्रमांक / Sr. No. | तपशील / Description | मूल्य / Value |
+   - Format callout boxes, notes, or tips with blockquotes (> ...).
+
+4. MATHEMATICAL & SCIENTIFIC FORMULAS:
+   - Convert all handwritten mathematical, statistical, or chemical expressions into standard LaTeX.
+   - Use $...$ for inline math (e.g., $f(x) = \\frac{{1}}{{\\sigma\\sqrt{{2\\pi}}}}e^{{-\\frac{{(x-\\mu)^2}}{{2\\sigma^2}}}}$).
+   - Use $$...$$ on a separate line for standalone display formulas.
+
+5. ZERO HALLUCINATION POLICY:
+   - Never fabricate or guess unwritten content.
+   - If a word is torn, faded, or completely unreadable, mark it clearly as [अस्पष्ट / Unclear] rather than guessing.
+
+Now transcribe the handwritten note into clean, standard typewriting format below:"""
+
+
 HIGH_ACCURACY_PROMPT_TEMPLATE = """You are a world-class handwriting transcription specialist and document preservation expert.
 
 PRIMARY INPUTS:
@@ -548,7 +632,9 @@ def execute_pipeline(
 
         # Stage B: Qwen2.5-VL
         if mode == "Merged Pipeline (Both Models - Highly Accurate)":
-            full_prompt = HIGH_ACCURACY_PROMPT_TEMPLATE.format(
+            is_marathi = any(kw in (custom_prompt or "").lower() for kw in ["marathi", "मराठी", "devanagari", "देवनागरी", "bilingual", "टंकलेखन"]) or not custom_prompt.strip()
+            template = MARATHI_ENGLISH_PROMPT_TEMPLATE if is_marathi else HIGH_ACCURACY_PROMPT_TEMPLATE
+            full_prompt = template.format(
                 paddle_text=paddle_out,
                 user_prompt=custom_prompt
             )
@@ -621,30 +707,118 @@ def export_standard_pdf(markdown_text, out_pdf_path=None):
         out_pdf_path = os.path.join(temp_dir, "transcribed_notes_publication.pdf")
 
     try:
+        from reportlab.platypus import Table, TableStyle
+
         styles = getSampleStyleSheet()
-        title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontSize=18, leading=22, spaceAfter=10, textColor=colors.HexColor('#0f172a'))
-        h1_style = ParagraphStyle('DocH1', parent=styles['Heading1'], fontSize=14, leading=18, spaceAfter=8, textColor=colors.HexColor('#1e40af'))
-        h2_style = ParagraphStyle('DocH2', parent=styles['Heading2'], fontSize=12, leading=16, spaceAfter=6, textColor=colors.HexColor('#2563eb'))
-        body_style = ParagraphStyle('DocBody', parent=styles['Normal'], fontSize=9.5, leading=13.5, spaceAfter=4, textColor=colors.HexColor('#334155'))
+        title_style = ParagraphStyle(
+            'DocTitle', parent=styles['Heading1'],
+            fontName=INDIC_FONT_BOLD, fontSize=18, leading=23,
+            spaceAfter=10, textColor=colors.HexColor('#0f172a')
+        )
+        h1_style = ParagraphStyle(
+            'DocH1', parent=styles['Heading1'],
+            fontName=INDIC_FONT_BOLD, fontSize=14, leading=19,
+            spaceAfter=8, textColor=colors.HexColor('#1e40af')
+        )
+        h2_style = ParagraphStyle(
+            'DocH2', parent=styles['Heading2'],
+            fontName=INDIC_FONT_BOLD, fontSize=12, leading=17,
+            spaceAfter=6, textColor=colors.HexColor('#2563eb')
+        )
+        body_style = ParagraphStyle(
+            'DocBody', parent=styles['Normal'],
+            fontName=INDIC_FONT_NAME, fontSize=10, leading=15,
+            spaceAfter=4, textColor=colors.HexColor('#334155')
+        )
+        bullet_style = ParagraphStyle(
+            'DocBullet', parent=styles['Normal'],
+            fontName=INDIC_FONT_NAME, fontSize=10, leading=15,
+            spaceAfter=3, leftIndent=15, textColor=colors.HexColor('#334155')
+        )
+        quote_style = ParagraphStyle(
+            'DocQuote', parent=styles['Normal'],
+            fontName=INDIC_FONT_NAME, fontSize=9.5, leading=14,
+            spaceAfter=5, leftIndent=20, textColor=colors.HexColor('#475569')
+        )
+        table_header_style = ParagraphStyle(
+            'TH', parent=styles['Normal'],
+            fontName=INDIC_FONT_BOLD, fontSize=9.5, leading=13,
+            textColor=colors.white
+        )
+        table_cell_style = ParagraphStyle(
+            'TD', parent=styles['Normal'],
+            fontName=INDIC_FONT_NAME, fontSize=9, leading=13,
+            textColor=colors.HexColor('#1e293b')
+        )
+
+        def clean_md_inline(txt):
+            txt = txt.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            txt = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', txt)
+            txt = re.sub(r'\*(.+?)\*', r'<i>\1</i>', txt)
+            return txt
 
         story = []
-        for line in markdown_text.split('\n'):
-            line = line.strip()
+        lines = markdown_text.split('\n')
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
             if not line:
                 story.append(Spacer(1, 4))
-            elif line.startswith('# '):
-                story.append(Paragraph(line[2:], title_style))
+                i += 1
+                continue
+
+            # Table parsing
+            if line.startswith('|') and line.endswith('|'):
+                table_rows = []
+                while i < len(lines) and lines[i].strip().startswith('|'):
+                    row_line = lines[i].strip()
+                    if re.match(r'^\|[\s\-:|]+\|$', row_line):
+                        i += 1
+                        continue
+                    cells = [c.strip() for c in row_line.split('|')[1:-1]]
+                    if not table_rows:
+                        table_rows.append([Paragraph(clean_md_inline(c), table_header_style) for c in cells])
+                    else:
+                        table_rows.append([Paragraph(clean_md_inline(c), table_cell_style) for c in cells])
+                    i += 1
+                if table_rows:
+                    num_cols = max(len(r) for r in table_rows)
+                    col_w = 480.0 / max(1, num_cols)
+                    col_widths = [col_w] * num_cols
+                    t = Table(table_rows, colWidths=col_widths)
+                    t.setStyle(TableStyle([
+                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1e40af')),
+                        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+                        ('TOPPADDING', (0,0), (-1,-1), 5),
+                        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cbd5e1')),
+                        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.HexColor('#f8fafc'), colors.white])
+                    ]))
+                    story.append(t)
+                    story.append(Spacer(1, 6))
+                continue
+
+            if line.startswith('# '):
+                story.append(Paragraph(clean_md_inline(line[2:]), title_style))
             elif line.startswith('## '):
-                story.append(Paragraph(line[3:], h1_style))
+                story.append(Paragraph(clean_md_inline(line[3:]), h1_style))
             elif line.startswith('### '):
-                story.append(Paragraph(line[4:], h2_style))
+                story.append(Paragraph(clean_md_inline(line[4:]), h2_style))
             elif line.startswith('---'):
                 story.append(HRFlowable(width='100%', thickness=1, color=colors.HexColor('#cbd5e1'), spaceAfter=6))
+            elif line.startswith('> '):
+                story.append(Paragraph(clean_md_inline(line[2:]), quote_style))
+            elif line.startswith('- ') or line.startswith('* ') or line.startswith('• '):
+                bullet_text = clean_md_inline(line[2:])
+                story.append(Paragraph(f"&bull;&nbsp;&nbsp;{bullet_text}", bullet_style))
+            elif re.match(r'^\d+[\.\)]\s+', line):
+                story.append(Paragraph(clean_md_inline(line), bullet_style))
             elif line.startswith('```'):
+                i += 1
                 continue
             else:
-                clean = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                story.append(Paragraph(clean, body_style))
+                story.append(Paragraph(clean_md_inline(line), body_style))
+            i += 1
 
         pdf_doc = SimpleDocTemplate(
             out_pdf_path,
@@ -668,10 +842,10 @@ CUSTOM_CSS = """
 """
 
 def create_ui():
-    with gr.Blocks(title="Universal Notes & Document Studio: PaddleOCR-VL + Qwen2.5-VL") as demo:
-        gr.Markdown("# ✍️ Universal Handwritten Notes & Document Studio", elem_id="main-title")
+    with gr.Blocks(title="Handwritten Notes Studio: Marathi & English Bilingual (PaddleOCR-VL + Qwen2.5-VL)") as demo:
+        gr.Markdown("# ✍️ Marathi & English Handwritten Notes Studio", elem_id="main-title")
         gr.Markdown(
-            "Reads **ANY File** (PDF, Images, DOCX, TXT) ➔ Converts to **Standard PDF** ➔ AI Reasoning (PaddleOCR-VL + Qwen2.5-VL)",
+            "Reads **EVERY File Format** ➔ Converts to **Standard PDF** ➔ **Marathi (मराठी) & English** AI Typewriting Format",
             elem_id="subtitle"
         )
 
@@ -679,12 +853,12 @@ def create_ui():
             # ================= Left Column: Universal Ingestion & Controls =================
             with gr.Column(scale=1):
                 doc_file = gr.File(
-                    label="📂 Upload Any File (PDF, Images, Word DOCX, TXT, TIFF, etc.)",
+                    label="📂 Upload Any File (PDF, Images, DOCX, TXT, Multi-page TIFF, etc.)",
                     file_types=[
                         ".pdf",
-                        ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif",
-                        ".docx",
-                        ".txt", ".md", ".csv"
+                        ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif", ".gif", ".ico",
+                        ".docx", ".doc",
+                        ".txt", ".md", ".csv", ".tsv", ".json", ".xml", ".log", ".py"
                     ]
                 )
 
@@ -724,7 +898,7 @@ def create_ui():
                     label="Execution Mode"
                 )
 
-                with gr.Accordion("🎯 Accuracy & Optimization", open=True):
+                with gr.Accordion("🎯 Accuracy & Bilingual Optimization", open=True):
                     auto_enhance = gr.Checkbox(
                         label="Auto-Enhance Contrast & Sharpness (Optimal for faint pencil/ink notes)",
                         value=True
@@ -732,17 +906,18 @@ def create_ui():
                     prompt_templates = gr.Dropdown(
                         label="Task Preset",
                         choices=[
+                            "Transcribe the handwritten notes accurately in Marathi (मराठी देवनागरी लिपी) and English into standard typewritten format with LaTeX math and clean markdown headings.",
                             "Transcribe the handwritten notes into structured Markdown and LaTeX formulas.",
-                            "Transcribe every word verbatim and preserve the exact original layout.",
-                            "Explain the handwritten solution or lecture notes step-by-step.",
+                            "Verbatim exact transcription preserving original handwritten layout (शब्दशः मुद्रण).",
+                            "Lecture & Study Notes Explainer (टिपण्या व सविस्तर स्पष्टीकरण).",
                             "Extract all math equations, definitions, and theorems from the notes.",
                             "Custom"
                         ],
-                        value="Transcribe the handwritten notes into structured Markdown and LaTeX formulas."
+                        value="Transcribe the handwritten notes accurately in Marathi (मराठी देवनागरी लिपी) and English into standard typewritten format with LaTeX math and clean markdown headings."
                     )
                     custom_prompt_input = gr.Textbox(
                         label="Custom Instruction",
-                        value="Transcribe the handwritten notes into structured Markdown and LaTeX formulas.",
+                        value="Transcribe the handwritten notes accurately in Marathi (मराठी देवनागरी लिपी) and English into standard typewritten format with LaTeX math and clean markdown headings.",
                         lines=2
                     )
 
