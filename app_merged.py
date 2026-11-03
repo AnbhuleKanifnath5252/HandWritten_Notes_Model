@@ -1,13 +1,13 @@
 """
-High-Accuracy Merged Handwritten Notes & Scanned PDF Studio
+Universal Handwritten Notes & Document Studio
 Powered by PaddleOCR-VL + Qwen2.5-VL
 Features:
- - Non-blocking background worker with live streaming (TextIteratorStreamer)
- - High-accuracy pre-processing (Auto-contrast & sharpness enhancement for faint notes)
- - Dual-model cross-validation pipeline (PaddleOCR character detection + Qwen visual reasoning)
- - Scanned PDF support (multi-page batching, page preview, high DPI rendering)
- - Low-RAM safeguards (garbage collection & sequential execution)
- - Real-time Stop / Cancel button
+ - Reads EVERY file format: Scanned PDF, Images (.png, .jpg, .webp, .tiff, .bmp), Word (.docx), Text (.txt, .md)
+ - Automatically converts any input into a Standard Multi-Page PDF
+ - High-accuracy dual-model pipeline (PaddleOCR-VL + Qwen2.5-VL)
+ - Non-blocking streaming background execution with live token updates
+ - Dual Export: Download as Markdown (.md) AND Standard Publication-Grade PDF (.pdf)
+ - Low-RAM safeguard & on-the-fly model reload/unload
 """
 
 import os
@@ -16,6 +16,7 @@ import sys
 # Disable TensorFlow/OneDNN warnings & force pure PyTorch
 os.environ["USE_TF"] = "0"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
 import gc
 import io
 import time
@@ -32,6 +33,18 @@ from transformers import (
     AutoModelForCausalLM,
     TextIteratorStreamer
 )
+
+# Optional document libraries
+try:
+    import docx
+    HAS_DOCX = True
+except ImportError:
+    HAS_DOCX = False
+
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 
 # Ensure local qwen-vl-utils is found
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -59,29 +72,9 @@ DEFAULT_QWEN_PATH = os.path.abspath("./models/Qwen2.5-VL-7B") if os.path.exists(
 
 
 # =====================================================================
-# High-Accuracy Image Preprocessing
+# Universal Document Converter -> Standard PDF
 # =====================================================================
-def enhance_handwritten_image(image: Image.Image, auto_contrast: bool = True, sharpness_factor: float = 1.3) -> Image.Image:
-    """Enhance contrast and sharpness so faint pencil/ink stands out against paper."""
-    if image is None:
-        return None
-    try:
-        img = image.convert("RGB")
-        if auto_contrast:
-            img = ImageOps.autocontrast(img, cutoff=1)
-        if sharpness_factor > 1.0:
-            enhancer = ImageEnhance.Sharpness(img)
-            img = enhancer.enhance(sharpness_factor)
-        return img
-    except Exception as e:
-        print(f"Enhancement warning: {e}")
-        return image
-
-
-# =====================================================================
-# PDF Processing (PyMuPDF)
-# =====================================================================
-def get_pdf_path(file_obj):
+def get_file_path(file_obj):
     if file_obj is None:
         return None
     if isinstance(file_obj, (list, tuple)):
@@ -99,6 +92,102 @@ def get_pdf_path(file_obj):
     return None
 
 
+def convert_any_file_to_standard_pdf(file_path):
+    """
+    Accepts ANY file format (PDF, PNG, JPG, WEBP, TIFF, BMP, DOCX, TXT, MD)
+    and normalizes it into a standard PDF file path.
+    """
+    if not file_path or not os.path.exists(file_path):
+        return None
+
+    ext = os.path.splitext(file_path)[1].lower()
+    temp_dir = tempfile.gettempdir()
+    out_pdf_path = os.path.join(temp_dir, f"normalized_{os.path.basename(file_path)}.pdf")
+
+    # 1. Already a standard PDF
+    if ext == ".pdf":
+        return file_path
+
+    # 2. Images (Single & Multi-page TIFF, PNG, JPG, BMP, WEBP)
+    if ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif"]:
+        try:
+            im = Image.open(file_path)
+            frames = []
+            try:
+                while True:
+                    frames.append(im.copy().convert("RGB"))
+                    im.seek(len(frames))
+            except EOFError:
+                pass
+
+            if frames:
+                frames[0].save(out_pdf_path, "PDF", resolution=150.0, save_all=True, append_images=frames[1:])
+            else:
+                im.convert("RGB").save(out_pdf_path, "PDF", resolution=150.0)
+            return out_pdf_path
+        except Exception as e:
+            print(f"Pillow image to PDF fallback to pymupdf: {e}")
+            try:
+                img_doc = pymupdf.open(file_path)
+                pdf_bytes = img_doc.convert_to_pdf()
+                with open(out_pdf_path, "wb") as f:
+                    f.write(pdf_bytes)
+                img_doc.close()
+                return out_pdf_path
+            except Exception as e2:
+                print(f"Image conversion error: {e2}")
+                return None
+
+    # 3. Word Documents (.docx)
+    if ext in [".docx", ".doc"] and HAS_DOCX:
+        try:
+            doc = docx.Document(file_path)
+            styles = getSampleStyleSheet()
+            h1 = ParagraphStyle('H1', parent=styles['Heading1'], fontSize=16, spaceAfter=8, textColor=colors.HexColor('#1e40af'))
+            body = ParagraphStyle('Body', parent=styles['Normal'], fontSize=10, leading=14, spaceAfter=4)
+
+            story = []
+            for para in doc.paragraphs:
+                txt = para.text.strip()
+                if not txt:
+                    story.append(Spacer(1, 4))
+                elif para.style.name.startswith("Heading"):
+                    story.append(Paragraph(txt, h1))
+                else:
+                    clean = txt.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    story.append(Paragraph(clean, body))
+
+            pdf_doc = SimpleDocTemplate(out_pdf_path, pagesize=letter, margin=40)
+            pdf_doc.build(story)
+            return out_pdf_path
+        except Exception as e:
+            print(f"DOCX to PDF conversion error: {e}")
+
+    # 4. Plain Text & Markdown (.txt, .md, .csv, .log)
+    if ext in [".txt", ".md", ".csv", ".log"]:
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            return export_standard_pdf(content, out_pdf_path)
+        except Exception as e:
+            print(f"Text to PDF conversion error: {e}")
+
+    # 5. Generic PyMuPDF fallback for other supported document formats (XPS, EPUB, etc.)
+    try:
+        generic_doc = pymupdf.open(file_path)
+        pdf_bytes = generic_doc.convert_to_pdf()
+        with open(out_pdf_path, "wb") as f:
+            f.write(pdf_bytes)
+        generic_doc.close()
+        return out_pdf_path
+    except Exception as e:
+        print(f"Generic document conversion failed: {e}")
+        return None
+
+
+# =====================================================================
+# PDF Page Extraction & Preprocessing (PyMuPDF + Pillow)
+# =====================================================================
 def get_pdf_page_count(pdf_path):
     if not pdf_path or not os.path.exists(pdf_path):
         return 0
@@ -108,8 +197,24 @@ def get_pdf_page_count(pdf_path):
         doc.close()
         return count
     except Exception as e:
-        print(f"Error reading PDF: {e}")
+        print(f"Error reading PDF page count: {e}")
         return 0
+
+
+def enhance_handwritten_image(image: Image.Image, auto_contrast: bool = True, sharpness_factor: float = 1.3) -> Image.Image:
+    if image is None:
+        return None
+    try:
+        img = image.convert("RGB")
+        if auto_contrast:
+            img = ImageOps.autocontrast(img, cutoff=1)
+        if sharpness_factor > 1.0:
+            enhancer = ImageEnhance.Sharpness(img)
+            img = enhancer.enhance(sharpness_factor)
+        return img
+    except Exception as e:
+        print(f"Enhancement warning: {e}")
+        return image
 
 
 def render_pdf_page(pdf_path, page_number=0, dpi=150, enhance=True):
@@ -126,7 +231,7 @@ def render_pdf_page(pdf_path, page_number=0, dpi=150, enhance=True):
         img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
         doc.close()
 
-        # Prevent browser payload/memory crashes on giant scans
+        # Prevent browser payload and memory crashes on giant scans
         max_dim = 1800
         if img.width > max_dim or img.height > max_dim:
             img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
@@ -140,7 +245,7 @@ def render_pdf_page(pdf_path, page_number=0, dpi=150, enhance=True):
 
 
 # =====================================================================
-# Memory Management & Model Loading
+# Memory Management & Model Lifecycle
 # =====================================================================
 def free_memory():
     gc.collect()
@@ -151,7 +256,6 @@ def free_memory():
 def load_paddle_model(model_path):
     if loaded_models["paddle"]["model"] is not None and loaded_models["paddle"]["path"] == model_path:
         return "[PaddleOCR-VL] Already loaded."
-
     try:
         processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
         device_map = "auto" if torch.cuda.is_available() else "cpu"
@@ -175,7 +279,6 @@ def load_paddle_model(model_path):
 def load_qwen_model(model_path):
     if loaded_models["qwen"]["model"] is not None and loaded_models["qwen"]["path"] == model_path:
         return "[Qwen2.5-VL] Already loaded."
-
     try:
         processor = AutoProcessor.from_pretrained(model_path)
         device_map = "auto" if torch.cuda.is_available() else "cpu"
@@ -196,7 +299,6 @@ def load_qwen_model(model_path):
 
 
 def unload_paddle_model():
-    """Unload Paddle to save RAM before heavy Qwen reasoning."""
     if loaded_models["paddle"]["model"] is not None:
         del loaded_models["paddle"]["model"]
         loaded_models["paddle"]["model"] = None
@@ -244,7 +346,7 @@ STRICT HIGH-ACCURACY RULES:
 1. RIGOROUS CROSS-VALIDATION:
    - Carefully verify every word in the visual scan against the raw OCR extract.
    - Correct optical misrecognitions (e.g. misread cursive, numbers vs letters like 0 vs O, 1 vs l, 5 vs S).
-   - If a word is partially ambiguous, use the semantic and scientific context of the notes to resolve it accurately.
+   - If a word is partially ambiguous, use the semantic context of the notes to resolve it accurately.
    - NEVER hallucinate, extrapolate, or invent information not present in the original document.
 
 2. MATHEMATICS, FORMULAS & NOTATION:
@@ -263,19 +365,16 @@ Produce the final, polished, highly accurate transcription below in clean Markdo
 
 
 # =====================================================================
-# Background Inference Workers (Streaming)
+# Model Inference Engines
 # =====================================================================
 def run_paddle_ocr(image, prompt="OCR:", max_tokens=1024):
     if loaded_models["paddle"]["model"] is None:
         return "PaddleOCR-VL model is not loaded."
-
     model = loaded_models["paddle"]["model"]
     processor = loaded_models["paddle"]["processor"]
-
     try:
         inputs = processor(text=prompt, images=image, return_tensors="pt")
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
-
         with torch.no_grad():
             output_ids = model.generate(
                 **inputs,
@@ -283,7 +382,6 @@ def run_paddle_ocr(image, prompt="OCR:", max_tokens=1024):
                 do_sample=False,
                 repetition_penalty=1.05
             )
-
         result = processor.decode(output_ids[0], skip_special_tokens=True)
         if result.startswith(prompt):
             result = result[len(prompt):].strip()
@@ -293,14 +391,11 @@ def run_paddle_ocr(image, prompt="OCR:", max_tokens=1024):
 
 
 def stream_qwen_vl(image, prompt, max_tokens=2048):
-    """Streams Qwen2.5-VL tokens in real-time using TextIteratorStreamer."""
     if loaded_models["qwen"]["model"] is None:
         yield "Qwen2.5-VL model is not loaded."
         return
-
     model = loaded_models["qwen"]["model"]
     processor = loaded_models["qwen"]["processor"]
-
     try:
         messages = [
             {
@@ -311,9 +406,7 @@ def stream_qwen_vl(image, prompt, max_tokens=2048):
                 ]
             }
         ]
-
         text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-
         if HAS_QWEN_UTILS:
             image_inputs, video_inputs = process_vision_info(messages)
             inputs = processor(
@@ -327,8 +420,6 @@ def stream_qwen_vl(image, prompt, max_tokens=2048):
             inputs = processor(text=[text], images=[image], padding=True, return_tensors="pt")
 
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
-
-        # Background streaming generation
         streamer = TextIteratorStreamer(processor.tokenizer, timeout=30.0, skip_prompt=True, skip_special_tokens=True)
         gen_kwargs = {
             **inputs,
@@ -337,30 +428,26 @@ def stream_qwen_vl(image, prompt, max_tokens=2048):
             "do_sample": False,
             "repetition_penalty": 1.05
         }
-
         thread = Thread(target=model.generate, kwargs=gen_kwargs)
         thread.start()
-
         accumulated_text = ""
         for chunk in streamer:
             accumulated_text += chunk
             yield accumulated_text
-
         thread.join()
     except Exception as e:
         yield f"Qwen2.5-VL error: {str(e)}"
 
 
 # =====================================================================
-# Main Multi-Stage Processing Pipeline (Generator / Background)
+# Main Multi-Stage Processing Pipeline (Background Generator)
 # =====================================================================
 def execute_pipeline(
-    input_type,
-    pdf_file,
-    pdf_page_num,
-    pdf_scope,
-    pdf_dpi,
-    direct_image,
+    input_file,
+    camera_image,
+    page_num,
+    scope,
+    dpi,
     auto_enhance,
     mode,
     custom_prompt,
@@ -369,46 +456,51 @@ def execute_pipeline(
     paddle_path,
     qwen_path
 ):
-    """
-    Generator function that runs in the background and streams live updates to the UI.
-    """
-    # 1. Determine targets
     images_to_process = []
     page_labels = []
 
-    if input_type == "📄 Scanned PDF":
-        pdf_path = get_pdf_path(pdf_file)
-        if not pdf_path:
-            yield "⚠️ Please upload a valid PDF file first.", "", "", "Idle"
+    # Check Camera Image First
+    if camera_image is not None and input_file is None:
+        img = enhance_handwritten_image(camera_image) if auto_enhance else camera_image
+        images_to_process.append(img)
+        page_labels.append("Captured Image")
+    else:
+        file_path = get_file_path(input_file)
+        if not file_path:
+            yield "⚠️ Please upload a document/image or capture a photo first.", "", "", "Idle"
+            return
+
+        yield "", "", "", "⏳ Converting & standardizing file to PDF..."
+        pdf_path = convert_any_file_to_standard_pdf(file_path)
+        if not pdf_path or not os.path.exists(pdf_path):
+            yield "⚠️ Could not convert this file format to standard PDF.", "", "", "Idle"
             return
 
         total_pages = get_pdf_page_count(pdf_path)
         if total_pages == 0:
-            yield "⚠️ Could not read any pages from the uploaded PDF.", "", "", "Idle"
+            yield "⚠️ Document has 0 readable pages.", "", "", "Idle"
             return
 
-        if pdf_scope == "Current Selected Page":
-            target_idx = int(pdf_page_num) - 1
-            yield "", "", "", f"⏳ [1/1] Rendering Page {pdf_page_num} of {total_pages}..."
-            img = render_pdf_page(pdf_path, target_idx, dpi=int(pdf_dpi), enhance=auto_enhance)
-            images_to_process.append(img)
-            page_labels.append(f"Page {pdf_page_num} of {total_pages}")
-        else:
-            # All pages
-            yield "", "", "", f"⏳ Rendering {total_pages} pages from PDF..."
-            for p in range(total_pages):
-                img = render_pdf_page(pdf_path, p, dpi=int(pdf_dpi), enhance=auto_enhance)
+        if scope == "Current Selected Page":
+            target_idx = max(0, min(total_pages - 1, int(page_num or 1) - 1))
+            yield "", "", "", f"⏳ Rendering Page {target_idx + 1} of {total_pages}..."
+            img = render_pdf_page(pdf_path, target_idx, dpi=int(dpi or 150), enhance=auto_enhance)
+            if img is not None:
                 images_to_process.append(img)
-                page_labels.append(f"Page {p + 1} of {total_pages}")
-    else:
-        if direct_image is None:
-            yield "⚠️ Please upload an image or take a photo first.", "", "", "Idle"
-            return
-        img = enhance_handwritten_image(direct_image) if auto_enhance else direct_image
-        images_to_process.append(img)
-        page_labels.append("Handwritten Note Image")
+                page_labels.append(f"Page {target_idx + 1} of {total_pages}")
+        else:
+            yield "", "", "", f"⏳ Rendering all {total_pages} pages..."
+            for p in range(total_pages):
+                img = render_pdf_page(pdf_path, p, dpi=int(dpi or 150), enhance=auto_enhance)
+                if img is not None:
+                    images_to_process.append(img)
+                    page_labels.append(f"Page {p + 1} of {total_pages}")
 
-    # 2. Check and load models
+    if not images_to_process:
+        yield "⚠️ No pages could be extracted from the document.", "", "", "Idle"
+        return
+
+    # Check and load models
     needs_paddle = mode in ["Merged Pipeline (Both Models - Highly Accurate)", "PaddleOCR-VL Only", "Side-by-Side Comparison"]
     needs_qwen = mode in ["Merged Pipeline (Both Models - Highly Accurate)", "Qwen2.5-VL Only", "Side-by-Side Comparison"]
 
@@ -426,7 +518,6 @@ def execute_pipeline(
             yield f"⚠️ {res}", "", "", "Error loading Qwen2.5-VL"
             return
 
-    # 3. Process pages
     total_items = len(images_to_process)
     compiled_final = ""
     compiled_paddle = ""
@@ -442,32 +533,28 @@ def execute_pipeline(
                 compiled_final,
                 compiled_paddle,
                 compiled_qwen,
-                f"⚙️ {item_prefix} - Step 1/2: Running PaddleOCR-VL character & formula detection..."
+                f"⚙️ {item_prefix} - Step 1/2: PaddleOCR-VL optical detection..."
             )
             paddle_out = run_paddle_ocr(img, prompt="OCR:", max_tokens=max_tokens)
             compiled_paddle += f"### {label}\n{paddle_out}\n\n"
 
-        # Sequential low-RAM offload
         if low_ram_mode and needs_paddle and needs_qwen:
-            yield compiled_final, compiled_paddle, compiled_qwen, f"🧹 Offloading PaddleOCR to free RAM before Qwen reasoning..."
+            yield compiled_final, compiled_paddle, compiled_qwen, "🧹 Offloading PaddleOCR to free RAM before Qwen reasoning..."
             unload_paddle_model()
 
-        # Ensure Qwen loaded
         if needs_qwen and loaded_models["qwen"]["model"] is None:
-            yield compiled_final, compiled_paddle, compiled_qwen, f"⏳ [Background] Loading Qwen2.5-VL weights..."
+            yield compiled_final, compiled_paddle, compiled_qwen, "⏳ [Background] Loading Qwen2.5-VL weights..."
             load_qwen_model(qwen_path)
 
         # Stage B: Qwen2.5-VL
         if mode == "Merged Pipeline (Both Models - Highly Accurate)":
-            full_verification_prompt = HIGH_ACCURACY_PROMPT_TEMPLATE.format(
+            full_prompt = HIGH_ACCURACY_PROMPT_TEMPLATE.format(
                 paddle_text=paddle_out,
                 user_prompt=custom_prompt
             )
-
-            status_text = f"🧠 {item_prefix} - Step 2/2: Cross-referencing visual & OCR with Qwen2.5-VL..."
+            status_text = f"🧠 {item_prefix} - Step 2/2: Reasoning & structuring with Qwen2.5-VL..."
             current_page_qwen = ""
-
-            for chunk in stream_qwen_vl(img, prompt=full_verification_prompt, max_tokens=max_tokens):
+            for chunk in stream_qwen_vl(img, prompt=full_prompt, max_tokens=max_tokens):
                 current_page_qwen = chunk
                 preview_combined = compiled_final + f"\n\n## 📄 {label}\n\n" + current_page_qwen
                 yield preview_combined, compiled_paddle, compiled_qwen + f"### {label}\n{current_page_qwen}\n\n", status_text
@@ -483,15 +570,13 @@ def execute_pipeline(
                 preview_combined = (
                     compiled_final +
                     f"\n\n## 📄 {label}\n\n"
-                    f"**🟢 PaddleOCR-VL:**\n\n{paddle_out}\n\n"
-                    f"---\n\n**🔵 Qwen2.5-VL:**\n\n{current_page_qwen}"
+                    f"**🟢 PaddleOCR-VL:**\n\n{paddle_out}\n\n---\n\n**🔵 Qwen2.5-VL:**\n\n{current_page_qwen}"
                 )
                 yield preview_combined, compiled_paddle, compiled_qwen + f"### {label}\n{current_page_qwen}\n\n", status_text
 
             compiled_final += (
                 f"\n\n## 📄 {label}\n\n"
-                f"**🟢 PaddleOCR-VL:**\n\n{paddle_out}\n\n"
-                f"---\n\n**🔵 Qwen2.5-VL:**\n\n{current_page_qwen}"
+                f"**🟢 PaddleOCR-VL:**\n\n{paddle_out}\n\n---\n\n**🔵 Qwen2.5-VL:**\n\n{current_page_qwen}"
             )
             compiled_qwen += f"### {label}\n{current_page_qwen}\n\n"
 
@@ -512,72 +597,121 @@ def execute_pipeline(
 
         free_memory()
 
-    yield compiled_final.strip(), compiled_paddle.strip(), compiled_qwen.strip(), f"🎉 All {total_items} item(s) processed successfully with maximum accuracy!"
+    yield compiled_final.strip(), compiled_paddle.strip(), compiled_qwen.strip(), f"🎉 All {total_items} page(s) processed and formatted successfully!"
 
 
+# =====================================================================
+# Dual Exporter (Markdown & Standard PDF via ReportLab)
+# =====================================================================
 def export_markdown_file(markdown_text):
     if not markdown_text or not markdown_text.strip():
         return None
     temp_dir = tempfile.gettempdir()
-    filepath = os.path.join(temp_dir, "transcribed_notes_accurate.md")
+    filepath = os.path.join(temp_dir, "transcribed_notes.md")
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(markdown_text)
     return filepath
+
+
+def export_standard_pdf(markdown_text, out_pdf_path=None):
+    if not markdown_text or not markdown_text.strip():
+        return None
+    if out_pdf_path is None:
+        temp_dir = tempfile.gettempdir()
+        out_pdf_path = os.path.join(temp_dir, "transcribed_notes_publication.pdf")
+
+    try:
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontSize=18, leading=22, spaceAfter=10, textColor=colors.HexColor('#0f172a'))
+        h1_style = ParagraphStyle('DocH1', parent=styles['Heading1'], fontSize=14, leading=18, spaceAfter=8, textColor=colors.HexColor('#1e40af'))
+        h2_style = ParagraphStyle('DocH2', parent=styles['Heading2'], fontSize=12, leading=16, spaceAfter=6, textColor=colors.HexColor('#2563eb'))
+        body_style = ParagraphStyle('DocBody', parent=styles['Normal'], fontSize=9.5, leading=13.5, spaceAfter=4, textColor=colors.HexColor('#334155'))
+
+        story = []
+        for line in markdown_text.split('\n'):
+            line = line.strip()
+            if not line:
+                story.append(Spacer(1, 4))
+            elif line.startswith('# '):
+                story.append(Paragraph(line[2:], title_style))
+            elif line.startswith('## '):
+                story.append(Paragraph(line[3:], h1_style))
+            elif line.startswith('### '):
+                story.append(Paragraph(line[4:], h2_style))
+            elif line.startswith('---'):
+                story.append(HRFlowable(width='100%', thickness=1, color=colors.HexColor('#cbd5e1'), spaceAfter=6))
+            elif line.startswith('```'):
+                continue
+            else:
+                clean = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                story.append(Paragraph(clean, body_style))
+
+        pdf_doc = SimpleDocTemplate(
+            out_pdf_path,
+            pagesize=letter,
+            rightMargin=45, leftMargin=45, topMargin=45, bottomMargin=45
+        )
+        pdf_doc.build(story)
+        return out_pdf_path
+    except Exception as e:
+        print(f"Error generating standard PDF: {e}")
+        return None
 
 
 # =====================================================================
 # Gradio Modern Frontend
 # =====================================================================
 CUSTOM_CSS = """
-#main-title { text-align: center; margin-bottom: 4px; font-weight: 700; }
-#subtitle { text-align: center; color: #4b5563; margin-bottom: 18px; font-size: 1.05em; }
+#main-title { text-align: center; margin-bottom: 2px; font-weight: 700; }
+#subtitle { text-align: center; color: #4b5563; margin-bottom: 16px; font-size: 1.05em; }
 .status-box { font-weight: 600; padding: 8px 12px; border-radius: 6px; background: #f3f4f6; }
 """
 
 def create_ui():
-
-    with gr.Blocks(title="Handwritten Notes Studio: PaddleOCR-VL + Qwen2.5-VL") as demo:
-        gr.Markdown("# ✍️ High-Accuracy Handwritten Notes Studio", elem_id="main-title")
+    with gr.Blocks(title="Universal Notes & Document Studio: PaddleOCR-VL + Qwen2.5-VL") as demo:
+        gr.Markdown("# ✍️ Universal Handwritten Notes & Document Studio", elem_id="main-title")
         gr.Markdown(
-            "Dual-Model Background Engine: **PaddleOCR-VL** (Optical Detection) + **Qwen2.5-VL** (Visual Reasoning) | **Scanned PDFs & Images**",
+            "Reads **ANY File** (PDF, Images, DOCX, TXT) ➔ Converts to **Standard PDF** ➔ AI Reasoning (PaddleOCR-VL + Qwen2.5-VL)",
             elem_id="subtitle"
         )
 
         with gr.Row():
-            # ================= Left Column: Input and Controls =================
+            # ================= Left Column: Universal Ingestion & Controls =================
             with gr.Column(scale=1):
-                input_type = gr.Radio(
-                    choices=["📄 Scanned PDF", "🖼️ Direct Image / Photo"],
-                    value="📄 Scanned PDF",
-                    label="Input Source"
+                doc_file = gr.File(
+                    label="📂 Upload Any File (PDF, Images, Word DOCX, TXT, TIFF, etc.)",
+                    file_types=[
+                        ".pdf",
+                        ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif",
+                        ".docx",
+                        ".txt", ".md", ".csv"
+                    ]
                 )
 
-                # PDF Group
-                with gr.Group(visible=True) as pdf_group:
-                    pdf_file = gr.File(label="Upload Scanned PDF File (.pdf)", file_types=[".pdf"])
-                    with gr.Row():
-                        pdf_status = gr.Markdown("No PDF loaded")
-                        pdf_scope = gr.Radio(
-                            choices=["Current Selected Page", "All Pages (Entire PDF)"],
-                            value="Current Selected Page",
-                            label="Processing Scope"
-                        )
-                    with gr.Row():
-                        page_slider = gr.Slider(
-                            minimum=1, maximum=10, step=1, value=1, label="Page Selector", interactive=False
-                        )
-                        pdf_dpi = gr.Slider(
-                            minimum=100, maximum=300, step=25, value=175, label="Rendering DPI (Quality)"
-                        )
-                    with gr.Row():
-                        prev_page_btn = gr.Button("◀ Prev Page", size="sm")
-                        next_page_btn = gr.Button("Next Page ▶", size="sm")
+                with gr.Accordion("📷 Or Capture from Camera / Clipboard", open=False):
+                    camera_image = gr.Image(sources=["webcam", "clipboard"], type="pil", label="Capture Direct Image")
 
-                    pdf_preview = gr.Image(type="pil", label="Scanned Page Preview", interactive=False)
+                with gr.Row():
+                    doc_status = gr.Markdown("No document loaded")
+                    doc_scope = gr.Radio(
+                        choices=["Current Selected Page", "All Pages (Entire Document)"],
+                        value="Current Selected Page",
+                        label="Processing Scope"
+                    )
 
-                # Direct Image Group
-                with gr.Group(visible=False) as image_group:
-                    direct_image = gr.Image(type="pil", label="Upload Handwritten Note / Photo")
+                with gr.Row():
+                    page_slider = gr.Slider(
+                        minimum=1, maximum=10, step=1, value=1, label="Page Selector", interactive=False
+                    )
+                    doc_dpi = gr.Slider(
+                        minimum=100, maximum=300, step=25, value=150, label="Rendering DPI (Quality)"
+                    )
+
+                with gr.Row():
+                    prev_page_btn = gr.Button("◀ Prev Page", size="sm")
+                    next_page_btn = gr.Button("Next Page ▶", size="sm")
+
+                page_preview = gr.Image(type="pil", label="Page Preview (Standard PDF View)", interactive=False)
 
                 mode_select = gr.Radio(
                     choices=[
@@ -590,9 +724,9 @@ def create_ui():
                     label="Execution Mode"
                 )
 
-                with gr.Accordion("🎯 Accuracy & Image Optimization", open=True):
+                with gr.Accordion("🎯 Accuracy & Optimization", open=True):
                     auto_enhance = gr.Checkbox(
-                        label="Auto-Enhance Contrast & Sharpness (Recommended for faint pencil/ink notes)",
+                        label="Auto-Enhance Contrast & Sharpness (Optimal for faint pencil/ink notes)",
                         value=True
                     )
                     prompt_templates = gr.Dropdown(
@@ -612,7 +746,7 @@ def create_ui():
                         lines=2
                     )
 
-                with gr.Accordion("⚙️ Hardware & Model Paths", open=False):
+                with gr.Accordion("⚙️ Hardware & Model Lifecycle", open=False):
                     low_ram_mode = gr.Checkbox(
                         label="Low-RAM Mode (Offloads PaddleOCR before running Qwen - Safe for 8GB RAM)",
                         value=True
@@ -624,7 +758,7 @@ def create_ui():
                     qwen_path_input = gr.Textbox(
                         label="Qwen2.5-VL Path or Repo ID",
                         value=DEFAULT_QWEN_PATH,
-                        info="For 8GB RAM on CPU, recommend 'Qwen/Qwen2.5-VL-3B-Instruct'."
+                        info="For 8GB RAM, 'Qwen/Qwen2.5-VL-3B-Instruct' is recommended."
                     )
                     max_tokens_slider = gr.Slider(
                         minimum=256, maximum=3072, value=1536, step=128, label="Max New Tokens"
@@ -640,14 +774,17 @@ def create_ui():
 
                 live_status = gr.Markdown("**Status:** Idle", elem_classes=["status-box"])
 
-            # ================= Right Column: Results & Export =================
+            # ================= Right Column: Results & Dual Export =================
             with gr.Column(scale=1):
                 with gr.Tabs():
-                    with gr.TabItem("🌟 Final Verified Markdown Result"):
+                    with gr.TabItem("🌟 Final Verified Result & PDF Export"):
                         final_output = gr.Markdown(label="Final Transcription")
                         with gr.Row():
-                            download_btn = gr.Button("💾 Export as Markdown (.md)", size="sm")
-                            download_file = gr.File(label="Download File", visible=False)
+                            download_md_btn = gr.Button("💾 Download as Markdown (.md)", size="sm")
+                            download_pdf_btn = gr.Button("📄 Download as Standard PDF (.pdf)", size="sm", variant="primary")
+                        with gr.Row():
+                            download_file_md = gr.File(label="Download Markdown", visible=False)
+                            download_file_pdf = gr.File(label="Download PDF", visible=False)
 
                     with gr.TabItem("📊 Multi-Model Raw Extracts"):
                         with gr.Row():
@@ -659,51 +796,50 @@ def create_ui():
                                 qwen_raw_output = gr.Textbox(label="Qwen2.5-VL Output", lines=20)
 
         # ================= UI Event Wiring =================
-        def switch_source(choice):
-            return gr.update(visible=(choice == "📄 Scanned PDF")), gr.update(visible=(choice != "📄 Scanned PDF"))
-
-        input_type.change(
-            fn=switch_source,
-            inputs=[input_type],
-            outputs=[pdf_group, image_group]
-        )
-
-        def on_pdf_uploaded(file, dpi, enhance):
+        def on_doc_uploaded(file, dpi, enhance):
             try:
-                pdf_path = get_pdf_path(file)
+                raw_path = get_file_path(file)
+                if not raw_path or not os.path.exists(raw_path):
+                    return gr.update(minimum=1, maximum=10, value=1, interactive=False), "⚠️ No file received", None
+
+                ext = os.path.splitext(raw_path)[1].upper()
+                pdf_path = convert_any_file_to_standard_pdf(raw_path)
                 if not pdf_path or not os.path.exists(pdf_path):
-                    return gr.update(minimum=1, maximum=10, value=1, interactive=False), "⚠️ No valid PDF received", None
+                    return gr.update(minimum=1, maximum=10, value=1, interactive=False), f"⚠️ Could not convert {ext} file to PDF", None
+
                 total = get_pdf_page_count(pdf_path)
                 if total == 0:
-                    return gr.update(minimum=1, maximum=10, value=1, interactive=False), "⚠️ Invalid or empty PDF", None
+                    return gr.update(minimum=1, maximum=10, value=1, interactive=False), "⚠️ Document has 0 readable pages", None
+
                 preview = render_pdf_page(pdf_path, 0, dpi=int(dpi or 150), enhance=bool(enhance))
                 slider_max = max(2, total)
                 return (
                     gr.update(minimum=1, maximum=slider_max, value=1, interactive=(total > 1)),
-                    f"✅ **Loaded PDF:** {total} page(s)",
+                    f"✅ **Converted to Standard PDF:** {total} page(s) ({ext})",
                     preview
                 )
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                return gr.update(minimum=1, maximum=10, value=1, interactive=False), f"⚠️ Error loading PDF: {str(e)}", None
+                return gr.update(minimum=1, maximum=10, value=1, interactive=False), f"⚠️ Error loading document: {str(e)}", None
 
-        pdf_file.upload(
-            fn=on_pdf_uploaded,
-            inputs=[pdf_file, pdf_dpi, auto_enhance],
-            outputs=[page_slider, pdf_status, pdf_preview]
+        doc_file.upload(
+            fn=on_doc_uploaded,
+            inputs=[doc_file, doc_dpi, auto_enhance],
+            outputs=[page_slider, doc_status, page_preview]
         )
 
-        pdf_file.clear(
-            fn=lambda: (gr.update(minimum=1, maximum=10, value=1, interactive=False), "No PDF loaded", None),
-            outputs=[page_slider, pdf_status, pdf_preview]
+        doc_file.clear(
+            fn=lambda: (gr.update(minimum=1, maximum=10, value=1, interactive=False), "No document loaded", None),
+            outputs=[page_slider, doc_status, page_preview]
         )
 
         def on_page_changed(file, page_num, dpi, enhance):
             try:
-                pdf_path = get_pdf_path(file)
-                if not pdf_path or not os.path.exists(pdf_path):
+                raw_path = get_file_path(file)
+                if not raw_path:
                     return None
+                pdf_path = convert_any_file_to_standard_pdf(raw_path)
                 total = get_pdf_page_count(pdf_path)
                 if total == 0:
                     return None
@@ -715,21 +851,22 @@ def create_ui():
 
         page_slider.change(
             fn=on_page_changed,
-            inputs=[pdf_file, page_slider, pdf_dpi, auto_enhance],
-            outputs=[pdf_preview]
+            inputs=[doc_file, page_slider, doc_dpi, auto_enhance],
+            outputs=[page_preview]
         )
 
-        pdf_dpi.change(
+        doc_dpi.change(
             fn=on_page_changed,
-            inputs=[pdf_file, page_slider, pdf_dpi, auto_enhance],
-            outputs=[pdf_preview]
+            inputs=[doc_file, page_slider, doc_dpi, auto_enhance],
+            outputs=[page_preview]
         )
 
         def navigate_page(file, current_page, direction):
             try:
-                pdf_path = get_pdf_path(file)
-                if not pdf_path or not os.path.exists(pdf_path):
+                raw_path = get_file_path(file)
+                if not raw_path:
                     return 1
+                pdf_path = convert_any_file_to_standard_pdf(raw_path)
                 total = get_pdf_page_count(pdf_path)
                 curr = int(current_page or 1)
                 new_page = max(1, min(total, curr + direction))
@@ -739,13 +876,13 @@ def create_ui():
 
         prev_page_btn.click(
             fn=lambda f, p: navigate_page(f, p, -1),
-            inputs=[pdf_file, page_slider],
+            inputs=[doc_file, page_slider],
             outputs=[page_slider]
         )
 
         next_page_btn.click(
             fn=lambda f, p: navigate_page(f, p, 1),
-            inputs=[pdf_file, page_slider],
+            inputs=[doc_file, page_slider],
             outputs=[page_slider]
         )
 
@@ -767,16 +904,14 @@ def create_ui():
             outputs=[model_status_log]
         )
 
-        # Background processing with cancellation support
         run_event = run_btn.click(
             fn=execute_pipeline,
             inputs=[
-                input_type,
-                pdf_file,
+                doc_file,
+                camera_image,
                 page_slider,
-                pdf_scope,
-                pdf_dpi,
-                direct_image,
+                doc_scope,
+                doc_dpi,
                 auto_enhance,
                 mode_select,
                 custom_prompt_input,
@@ -800,16 +935,16 @@ def create_ui():
             cancels=[run_event]
         )
 
-        def handle_export(text):
-            out_path = export_markdown_file(text)
-            if out_path:
-                return gr.update(value=out_path, visible=True)
-            return gr.update(visible=False)
-
-        download_btn.click(
-            fn=handle_export,
+        download_md_btn.click(
+            fn=lambda text: gr.update(value=export_markdown_file(text), visible=True) if text else gr.update(visible=False),
             inputs=[final_output],
-            outputs=[download_file]
+            outputs=[download_file_md]
+        )
+
+        download_pdf_btn.click(
+            fn=lambda text: gr.update(value=export_standard_pdf(text), visible=True) if text else gr.update(visible=False),
+            inputs=[final_output],
+            outputs=[download_file_pdf]
         )
 
     return demo
@@ -817,6 +952,5 @@ def create_ui():
 
 if __name__ == "__main__":
     demo = create_ui()
-    # Launch with queue enabled so background streaming works seamlessly
     demo.queue()
     demo.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True, css=CUSTOM_CSS)
