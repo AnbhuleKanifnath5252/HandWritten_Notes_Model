@@ -110,15 +110,22 @@ def get_file_path(file_obj):
         file_obj = file_obj[0] if len(file_obj) > 0 else None
     if file_obj is None:
         return None
+
+    path = None
     if isinstance(file_obj, str):
-        return file_obj
-    if isinstance(file_obj, dict):
-        return file_obj.get("path") or file_obj.get("name")
-    if hasattr(file_obj, "path"):
-        return file_obj.path
-    if hasattr(file_obj, "name"):
-        return file_obj.name
-    return None
+        path = file_obj
+    elif isinstance(file_obj, dict):
+        path = file_obj.get("path") or file_obj.get("name")
+    elif hasattr(file_obj, "path"):
+        path = file_obj.path
+    elif hasattr(file_obj, "name"):
+        path = file_obj.name
+
+    if path:
+        import urllib.parse
+        path = urllib.parse.unquote(str(path))
+        path = os.path.abspath(path)
+    return path
 
 
 def convert_any_file_to_standard_pdf(file_path):
@@ -253,7 +260,7 @@ def enhance_handwritten_image(image: Image.Image, auto_contrast: bool = True, sh
         return image
 
 
-def render_pdf_page(pdf_path, page_number=0, dpi=150, enhance=True):
+def render_pdf_page(pdf_path, page_number=0, dpi=150, enhance=True, as_filepath=False):
     if not pdf_path or not os.path.exists(pdf_path):
         return None
     try:
@@ -267,12 +274,20 @@ def render_pdf_page(pdf_path, page_number=0, dpi=150, enhance=True):
         doc.close()
 
         # Prevent browser payload and memory crashes on giant scans
-        max_dim = 1800
+        max_dim = 1600
         if img.width > max_dim or img.height > max_dim:
             img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
 
         if enhance:
             img = enhance_handwritten_image(img)
+
+        # Return filepath for lightning-fast, zero-overhead browser preview
+        if as_filepath:
+            temp_dir = tempfile.gettempdir()
+            preview_file = os.path.join(temp_dir, f"preview_page_{page_number}.png")
+            img.save(preview_file, format="PNG")
+            return preview_file
+
         return img
     except Exception as e:
         print(f"Error rendering PDF page {page_number}: {e}")
@@ -884,7 +899,7 @@ def create_ui():
                     prev_page_btn = gr.Button("◀ Prev Page", size="sm")
                     next_page_btn = gr.Button("Next Page ▶", size="sm")
 
-                page_preview = gr.Image(type="pil", label="Page Preview (Standard PDF View)", interactive=False)
+                page_preview = gr.Image(type="filepath", label="Page Preview (Standard PDF View)", interactive=False)
 
                 mode_select = gr.Radio(
                     choices=[
@@ -985,7 +1000,7 @@ def create_ui():
                 if total == 0:
                     return gr.update(minimum=1, maximum=10, value=1, interactive=False), "⚠️ Document has 0 readable pages", None
 
-                preview = render_pdf_page(pdf_path, 0, dpi=int(dpi or 150), enhance=bool(enhance))
+                preview = render_pdf_page(pdf_path, 0, dpi=int(dpi or 150), enhance=bool(enhance), as_filepath=True)
                 slider_max = max(2, total)
                 return (
                     gr.update(minimum=1, maximum=slider_max, value=1, interactive=(total > 1)),
@@ -1018,7 +1033,7 @@ def create_ui():
                 if total == 0:
                     return None
                 p_idx = max(0, min(total - 1, int(page_num or 1) - 1))
-                return render_pdf_page(pdf_path, p_idx, dpi=int(dpi or 150), enhance=bool(enhance))
+                return render_pdf_page(pdf_path, p_idx, dpi=int(dpi or 150), enhance=bool(enhance), as_filepath=True)
             except Exception as e:
                 print(f"Error in on_page_changed: {e}")
                 return None
@@ -1127,4 +1142,12 @@ def create_ui():
 if __name__ == "__main__":
     demo = create_ui()
     demo.queue()
-    demo.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True, css=CUSTOM_CSS)
+    demo.launch(
+        server_name="127.0.0.1",
+        server_port=7860,
+        inbrowser=False,
+        css=CUSTOM_CSS,
+        show_error=True,
+        max_file_size="500MB",
+        allowed_paths=[tempfile.gettempdir(), os.path.abspath(".")]
+    )
