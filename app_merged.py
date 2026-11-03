@@ -203,6 +203,28 @@ def unload_paddle_model():
         free_memory()
 
 
+def unload_all_models():
+    """Unloads all models from memory and frees RAM."""
+    for key in ["paddle", "qwen"]:
+        if loaded_models[key]["model"] is not None:
+            del loaded_models[key]["model"]
+            loaded_models[key]["model"] = None
+        if loaded_models[key]["processor"] is not None:
+            del loaded_models[key]["processor"]
+            loaded_models[key]["processor"] = None
+        loaded_models[key]["path"] = ""
+    free_memory()
+    return "🧹 All models unloaded. System RAM freed."
+
+
+def reload_models(paddle_path, qwen_path):
+    """Purges loaded models and re-initializes fresh weights from disk."""
+    unload_all_models()
+    res_p = load_paddle_model(paddle_path)
+    res_q = load_qwen_model(qwen_path)
+    return f"🔄 Reload Complete:\n- {res_p}\n- {res_q}"
+
+
 # =====================================================================
 # High-Accuracy Prompts
 # =====================================================================
@@ -607,6 +629,10 @@ def create_ui():
                     max_tokens_slider = gr.Slider(
                         minimum=256, maximum=3072, value=1536, step=128, label="Max New Tokens"
                     )
+                    with gr.Row():
+                        btn_reload_models = gr.Button("🔄 Reload Models", size="sm", variant="secondary")
+                        btn_unload_models = gr.Button("🧹 Free RAM (Unload)", size="sm")
+                    model_status_log = gr.Markdown("Models load automatically upon analysis.")
 
                 with gr.Row():
                     run_btn = gr.Button("🚀 Run Analysis (Background)", variant="primary", size="lg", scale=3)
@@ -727,6 +753,18 @@ def create_ui():
             fn=lambda x, cur: x if x != "Custom" else cur,
             inputs=[prompt_templates, custom_prompt_input],
             outputs=[custom_prompt_input]
+        )
+
+        btn_reload_models.click(
+            fn=reload_models,
+            inputs=[paddle_path_input, qwen_path_input],
+            outputs=[model_status_log]
+        )
+
+        btn_unload_models.click(
+            fn=unload_all_models,
+            inputs=[],
+            outputs=[model_status_log]
         )
 
         # Background processing with cancellation support
