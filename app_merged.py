@@ -80,8 +80,16 @@ def enhance_handwritten_image(image: Image.Image, auto_contrast: bool = True, sh
 def get_pdf_path(file_obj):
     if file_obj is None:
         return None
+    if isinstance(file_obj, (list, tuple)):
+        file_obj = file_obj[0] if len(file_obj) > 0 else None
+    if file_obj is None:
+        return None
     if isinstance(file_obj, str):
         return file_obj
+    if isinstance(file_obj, dict):
+        return file_obj.get("path") or file_obj.get("name")
+    if hasattr(file_obj, "path"):
+        return file_obj.path
     if hasattr(file_obj, "name"):
         return file_obj.name
     return None
@@ -108,9 +116,17 @@ def render_pdf_page(pdf_path, page_number=0, dpi=150, enhance=True):
         if page_number < 0 or page_number >= len(doc):
             page_number = 0
         page = doc[page_number]
-        pix = page.get_pixmap(dpi=dpi)
-        img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+        pix = page.get_pixmap(dpi=int(dpi or 150))
+        if pix.alpha:
+            pix = pymupdf.Pixmap(pix, 0)
+        img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
         doc.close()
+
+        # Prevent browser payload/memory crashes on giant scans
+        max_dim = 1800
+        if img.width > max_dim or img.height > max_dim:
+            img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+
         if enhance:
             img = enhance_handwritten_image(img)
         return img
@@ -623,31 +639,49 @@ def create_ui():
         )
 
         def on_pdf_uploaded(file, dpi, enhance):
-            pdf_path = get_pdf_path(file)
-            if not pdf_path:
-                return gr.update(minimum=1, maximum=10, value=1, interactive=False), "No PDF loaded", None
-            total = get_pdf_page_count(pdf_path)
-            if total == 0:
-                return gr.update(minimum=1, maximum=10, value=1, interactive=False), "⚠️ Invalid or empty PDF", None
-            preview = render_pdf_page(pdf_path, 0, dpi=int(dpi), enhance=enhance)
-            slider_max = max(2, total)
-            return (
-                gr.update(minimum=1, maximum=slider_max, value=1, interactive=(total > 1)),
-                f"✅ **Loaded PDF:** {total} page(s)",
-                preview
-            )
+            try:
+                pdf_path = get_pdf_path(file)
+                if not pdf_path or not os.path.exists(pdf_path):
+                    return gr.update(minimum=1, maximum=10, value=1, interactive=False), "⚠️ No valid PDF received", None
+                total = get_pdf_page_count(pdf_path)
+                if total == 0:
+                    return gr.update(minimum=1, maximum=10, value=1, interactive=False), "⚠️ Invalid or empty PDF", None
+                preview = render_pdf_page(pdf_path, 0, dpi=int(dpi or 150), enhance=bool(enhance))
+                slider_max = max(2, total)
+                return (
+                    gr.update(minimum=1, maximum=slider_max, value=1, interactive=(total > 1)),
+                    f"✅ **Loaded PDF:** {total} page(s)",
+                    preview
+                )
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return gr.update(minimum=1, maximum=10, value=1, interactive=False), f"⚠️ Error loading PDF: {str(e)}", None
 
-        pdf_file.change(
+        pdf_file.upload(
             fn=on_pdf_uploaded,
             inputs=[pdf_file, pdf_dpi, auto_enhance],
             outputs=[page_slider, pdf_status, pdf_preview]
         )
 
+        pdf_file.clear(
+            fn=lambda: (gr.update(minimum=1, maximum=10, value=1, interactive=False), "No PDF loaded", None),
+            outputs=[page_slider, pdf_status, pdf_preview]
+        )
+
         def on_page_changed(file, page_num, dpi, enhance):
-            pdf_path = get_pdf_path(file)
-            if not pdf_path:
+            try:
+                pdf_path = get_pdf_path(file)
+                if not pdf_path or not os.path.exists(pdf_path):
+                    return None
+                total = get_pdf_page_count(pdf_path)
+                if total == 0:
+                    return None
+                p_idx = max(0, min(total - 1, int(page_num or 1) - 1))
+                return render_pdf_page(pdf_path, p_idx, dpi=int(dpi or 150), enhance=bool(enhance))
+            except Exception as e:
+                print(f"Error in on_page_changed: {e}")
                 return None
-            return render_pdf_page(pdf_path, int(page_num) - 1, dpi=int(dpi), enhance=enhance)
 
         page_slider.change(
             fn=on_page_changed,
@@ -662,12 +696,16 @@ def create_ui():
         )
 
         def navigate_page(file, current_page, direction):
-            pdf_path = get_pdf_path(file)
-            if not pdf_path:
+            try:
+                pdf_path = get_pdf_path(file)
+                if not pdf_path or not os.path.exists(pdf_path):
+                    return 1
+                total = get_pdf_page_count(pdf_path)
+                curr = int(current_page or 1)
+                new_page = max(1, min(total, curr + direction))
+                return new_page
+            except Exception:
                 return 1
-            total = get_pdf_page_count(pdf_path)
-            new_page = max(1, min(total, int(current_page) + direction))
-            return new_page
 
         prev_page_btn.click(
             fn=lambda f, p: navigate_page(f, p, -1),
