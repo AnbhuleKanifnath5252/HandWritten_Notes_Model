@@ -2,8 +2,10 @@
 ### Powered by PaddleOCR-VL (Optical Recognition) + Qwen2.5-VL (Visual Reasoning)
 
 [![GitHub Repo](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/AnbhuleKanifnath5252/HandWritten_Notes_Model)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/AnbhuleKanifnath5252/HandWritten_Notes_Model)
 [![OpenAI API](https://img.shields.io/badge/OpenAI_API-Compatible-green?logo=openai)](http://127.0.0.1:8000/docs)
 [![Android APK](https://img.shields.io/badge/Android-APK_%26_PWA-brightgreen?logo=android)](https://github.com/AnbhuleKanifnath5252/HandWritten_Notes_Model/actions)
+[![Font](https://img.shields.io/badge/Font-Times_New_Roman-darkred)]()
 [![Language](https://img.shields.io/badge/Bilingual-मराठी_|_English-orange)]()
 
 ---
@@ -11,29 +13,32 @@
 ## 🌟 Key Features
 
 1. **Universal File Ingestion ➔ Standard PDF**:
-   - Accepts **ANY file format**: Scanned PDF, Images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tiff`, `.tif`, `.gif`), Microsoft Word (`.docx`, `.doc`), Plain Text, Markdown, CSV, TSV, and Source Code (`.txt`, `.md`, `.py`, `.json`, etc.).
-   - Automatically standardizes multi-page documents into a crisp, paginated standard PDF with instant multi-page preview.
+   - Accepts **ANY file format**: Scanned PDF (Grayscale, CMYK, RGB), Images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tiff`, `.tif`, `.heic`), Microsoft Word (`.docx`, `.doc`), Plain Text, Markdown, CSV, TSV, and Source Code (`.txt`, `.md`, `.py`, `.json`, etc.).
+   - Mobile camera snapshots are automatically auto-oriented with `exif_transpose` so portrait photos never end up sideways.
+   - Dynamic page-by-page generator processes 10 to 100+ page documents with strictly 1 page in memory at a time, completely eliminating out-of-memory errors on 8 GB RAM systems.
 
-2. **Bilingual Marathi (मराठी) & English Handwriting Recognition**:
+2. **🖋️ Times New Roman Typewriting Format**:
+   - Converts ambiguous, sloppy, or cursive handwriting into crisp, publication-grade academic typewriting formatted in **Times New Roman** (`Times-Roman` / `Times-Bold`).
+   - Generates authentic serif headings, formal numbered points, aligned tables, and LaTeX math equations ($...$ and $$...$$).
+   - Exported PDFs automatically use TrueType Times New Roman for Latin/English text and seamlessly fall back to Devanagari Nirmala UI for Marathi script.
+
+3. **Bilingual Marathi (मराठी) & English Handwriting Recognition**:
    - **Devanagari Script (देवनागरी)**: Accurately transcribes Marathi vowels, consonants, matras (काना, वेलांटी, उकार, मात्रा, अनुस्वार), conjuncts (जोडअक्षरे जसे की 'प्र', 'त्र', 'ज्ञ', 'क्ष', 'द्ध', 'ष्ट', 'ण्य', 'रफार'), and Marathi numerals (०-९).
    - **Standard Typewriting Format (प्रमाणित टंकलेखन)**: Converts hasty, ambiguous notes into publication-grade typewritten format with clear headings (`#`, `##`), structured bullet points, aligned Markdown tables, and LaTeX formulas ($...$ and $$...$$).
-   - **Indic Typography**: Native ReportLab PDF export with `Nirmala.ttc` ensures Marathi characters render crisply without missing matras or font distortion.
 
-3. **OpenAI-Compatible REST API Server (`openai_api_server.py`)**:
+4. **🌐 Live Vercel Web Deployment (`vercel.json` + `public/`)**:
+   - Ready for instant 1-click deployment on Vercel (`https://vercel.com/new`).
+   - Features a responsive web app with Times New Roman live typewriter effect, client-side preview, camera scanning, and PDF download.
+   - Includes Vercel Serverless Python functions (`api/health.py`, `api/models.py`).
+
+5. **OpenAI-Compatible REST API Server (`openai_api_server.py`)**:
    - Fully implements OpenAI's official `/v1/chat/completions` API (streaming SSE + JSON).
    - Compatible with the official OpenAI Python SDK (`OpenAI(base_url="http://localhost:8000/v1")`), LangChain, and any mobile app.
    - Multimodal vision support (Base64 data URLs and image URLs).
-   - Endpoints:
-     - `POST /v1/chat/completions` — Vision & Text Chat Completions
-     - `GET /v1/models` — Model Catalog
-     - `POST /v1/documents/convert` — Universal file to PDF converter
-     - `POST /v1/documents/export-pdf` — Markdown to Publication-grade Bilingual PDF
-     - `GET /docs` — Interactive OpenAPI Swagger UI
 
-4. **Mobile Android APK & PWA Suite (`mobile_app/`)**:
+6. **Mobile Android APK & PWA Suite (`mobile_app/`)**:
    - **Instant 1-Tap Mobile Install (WebAPK / PWA)**: Open `http://<PC_IP>:8000` on Android Chrome/Edge, tap *"Install App"* / *"Add to Home screen"* to get a native Android app icon with hardware camera scanning!
    - **Cloud APK Builder via GitHub Actions**: Pre-configured workflow (`.github/workflows/build_apk.yml`) compiles `app-debug.apk` in the cloud on every push.
-   - **Native Capacitor Project**: Full source code in `mobile_app/` with camera permissions (`AndroidManifest.xml`).
 
 ---
 

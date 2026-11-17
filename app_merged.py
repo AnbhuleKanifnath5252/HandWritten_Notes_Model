@@ -50,20 +50,35 @@ from reportlab.pdfbase.ttfonts import TTFont
 import re
 
 # =====================================================================
-# Font Registration for Indic (Marathi / Devanagari) + English PDF Export
+# Font Registration: Times New Roman (Classic Typing) + Devanagari (Nirmala)
 # =====================================================================
-INDIC_FONT_NAME = "Helvetica"
-INDIC_FONT_BOLD = "Helvetica-Bold"
+TIMES_FONT_REGULAR = "Times-Roman"
+TIMES_FONT_BOLD = "Times-Bold"
+TIMES_FONT_ITALIC = "Times-Italic"
+INDIC_FONT_NAME = "Times-Roman"
+INDIC_FONT_BOLD = "Times-Bold"
 
 try:
     windows_fonts = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts")
+    
+    # 1. Register Times New Roman TrueType if available on Windows
+    times_ttf = os.path.join(windows_fonts, "times.ttf")
+    timesbd_ttf = os.path.join(windows_fonts, "timesbd.ttf")
+    if os.path.exists(times_ttf) and os.path.exists(timesbd_ttf):
+        pdfmetrics.registerFont(TTFont("TimesNewRoman", times_ttf))
+        pdfmetrics.registerFont(TTFont("TimesNewRomanBold", timesbd_ttf))
+        TIMES_FONT_REGULAR = "TimesNewRoman"
+        TIMES_FONT_BOLD = "TimesNewRomanBold"
+        print("[Font Setup] Successfully registered TrueType Times New Roman for academic typewriting.")
+
+    # 2. Register Devanagari (Nirmala UI) for Marathi handwriting
     nirmala_path = os.path.join(windows_fonts, "Nirmala.ttc")
     if os.path.exists(nirmala_path):
         pdfmetrics.registerFont(TTFont("Nirmala", nirmala_path, subfontIndex=0))
         pdfmetrics.registerFont(TTFont("NirmalaBold", nirmala_path, subfontIndex=1))
         INDIC_FONT_NAME = "Nirmala"
         INDIC_FONT_BOLD = "NirmalaBold"
-        print("[Font Setup] Successfully registered Nirmala TTC for Marathi Devanagari + English typography.")
+        print("[Font Setup] Successfully registered Nirmala TTC for Marathi Devanagari typography.")
     else:
         mangal_path = os.path.join(windows_fonts, "mangal.ttf")
         if os.path.exists(mangal_path):
@@ -72,7 +87,7 @@ try:
             INDIC_FONT_BOLD = "Mangal"
             print("[Font Setup] Successfully registered Mangal TTF for Marathi Devanagari typography.")
 except Exception as fe:
-    print(f"[Font Setup Warning] Could not register Indic font, falling back to Helvetica: {fe}")
+    print(f"[Font Setup Warning] Font setup fallback to defaults: {fe}")
 
 
 # Ensure local qwen-vl-utils is found
@@ -138,20 +153,24 @@ def convert_any_file_to_standard_pdf(file_path):
 
     ext = os.path.splitext(file_path)[1].lower()
     temp_dir = tempfile.gettempdir()
-    out_pdf_path = os.path.join(temp_dir, f"normalized_{os.path.basename(file_path)}.pdf")
+    import uuid
+    safe_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', os.path.basename(file_path))
+    out_pdf_path = os.path.join(temp_dir, f"normalized_{uuid.uuid4().hex[:6]}_{safe_name}.pdf")
 
     # 1. Already a standard PDF
     if ext == ".pdf":
         return file_path
 
-    # 2. All Image Formats (Single & Multi-page TIFF, PNG, JPG, JPEG, WEBP, BMP, GIF, ICO, PPM, etc.)
-    if ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif", ".gif", ".ico", ".ppm", ".pgm", ".pbm"]:
+    # 2. All Image Formats (Single & Multi-page TIFF, PNG, JPG, JPEG, WEBP, BMP, GIF, ICO, HEIC, etc.)
+    if ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif", ".gif", ".ico", ".ppm", ".pgm", ".pbm", ".heic", ".heif"]:
         try:
             im = Image.open(file_path)
+            im = ImageOps.exif_transpose(im) # Auto-orient phone camera photos
             frames = []
             try:
                 while True:
-                    frames.append(im.copy().convert("RGB"))
+                    frame = ImageOps.exif_transpose(im).convert("RGB")
+                    frames.append(frame)
                     im.seek(len(frames))
             except EOFError:
                 pass
@@ -181,8 +200,8 @@ def convert_any_file_to_standard_pdf(file_path):
         try:
             doc = docx.Document(file_path)
             styles = getSampleStyleSheet()
-            h1 = ParagraphStyle('H1', parent=styles['Heading1'], fontName=INDIC_FONT_BOLD, fontSize=16, spaceAfter=8, textColor=colors.HexColor('#1e40af'))
-            body = ParagraphStyle('Body', parent=styles['Normal'], fontName=INDIC_FONT_NAME, fontSize=10, leading=15, spaceAfter=4)
+            h1 = ParagraphStyle('H1', parent=styles['Heading1'], fontName=TIMES_FONT_BOLD, fontSize=16, spaceAfter=8, textColor=colors.HexColor('#1e40af'))
+            body = ParagraphStyle('Body', parent=styles['Normal'], fontName=TIMES_FONT_REGULAR, fontSize=10, leading=15, spaceAfter=4)
 
             story = []
             for para in doc.paragraphs:
@@ -557,11 +576,13 @@ def execute_pipeline(
     images_to_process = []
     page_labels = []
 
+    target_tasks = []
+    pdf_path = None
+
     # Check Camera Image First
     if camera_image is not None and input_file is None:
         img = enhance_handwritten_image(camera_image) if auto_enhance else camera_image
-        images_to_process.append(img)
-        page_labels.append("Captured Image")
+        target_tasks.append((None, "Captured Image", img))
     else:
         file_path = get_file_path(input_file)
         if not file_path:
@@ -581,20 +602,12 @@ def execute_pipeline(
 
         if scope == "Current Selected Page":
             target_idx = max(0, min(total_pages - 1, int(page_num or 1) - 1))
-            yield "", "", "", f"⏳ Rendering Page {target_idx + 1} of {total_pages}..."
-            img = render_pdf_page(pdf_path, target_idx, dpi=int(dpi or 150), enhance=auto_enhance)
-            if img is not None:
-                images_to_process.append(img)
-                page_labels.append(f"Page {target_idx + 1} of {total_pages}")
+            target_tasks.append((target_idx, f"Page {target_idx + 1} of {total_pages}", None))
         else:
-            yield "", "", "", f"⏳ Rendering all {total_pages} pages..."
             for p in range(total_pages):
-                img = render_pdf_page(pdf_path, p, dpi=int(dpi or 150), enhance=auto_enhance)
-                if img is not None:
-                    images_to_process.append(img)
-                    page_labels.append(f"Page {p + 1} of {total_pages}")
+                target_tasks.append((p, f"Page {p + 1} of {total_pages}", None))
 
-    if not images_to_process:
+    if not target_tasks:
         yield "⚠️ No pages could be extracted from the document.", "", "", "Idle"
         return
 
@@ -616,13 +629,27 @@ def execute_pipeline(
             yield f"⚠️ {res}", "", "", "Error loading Qwen2.5-VL"
             return
 
-    total_items = len(images_to_process)
+    total_items = len(target_tasks)
     compiled_final = ""
     compiled_paddle = ""
     compiled_qwen = ""
 
-    for idx, (img, label) in enumerate(zip(images_to_process, page_labels)):
+    for idx, (p_idx, label, direct_img) in enumerate(target_tasks):
         item_prefix = f"[{idx + 1}/{total_items}] {label}"
+
+        # Fetch or render image on demand (strictly 1 image in RAM at a time)
+        if direct_img is not None:
+            img = direct_img
+        else:
+            yield (
+                compiled_final,
+                compiled_paddle,
+                compiled_qwen,
+                f"⏳ Rendering {label}..."
+            )
+            img = render_pdf_page(pdf_path, p_idx, dpi=int(dpi or 150), enhance=auto_enhance)
+            if img is None:
+                continue
 
         # Stage A: PaddleOCR-VL
         paddle_out = ""
@@ -723,45 +750,50 @@ def export_standard_pdf(markdown_text, out_pdf_path=None):
     try:
         from reportlab.platypus import Table, TableStyle
 
+        # Select font: Times New Roman by default for classic typing, Nirmala for Devanagari
+        has_devanagari = bool(re.search(r'[\u0900-\u097F]', markdown_text))
+        font_reg = INDIC_FONT_NAME if has_devanagari else TIMES_FONT_REGULAR
+        font_bold = INDIC_FONT_BOLD if has_devanagari else TIMES_FONT_BOLD
+
         styles = getSampleStyleSheet()
         title_style = ParagraphStyle(
             'DocTitle', parent=styles['Heading1'],
-            fontName=INDIC_FONT_BOLD, fontSize=18, leading=23,
+            fontName=font_bold, fontSize=18, leading=23,
             spaceAfter=10, textColor=colors.HexColor('#0f172a')
         )
         h1_style = ParagraphStyle(
             'DocH1', parent=styles['Heading1'],
-            fontName=INDIC_FONT_BOLD, fontSize=14, leading=19,
+            fontName=font_bold, fontSize=14, leading=19,
             spaceAfter=8, textColor=colors.HexColor('#1e40af')
         )
         h2_style = ParagraphStyle(
             'DocH2', parent=styles['Heading2'],
-            fontName=INDIC_FONT_BOLD, fontSize=12, leading=17,
+            fontName=font_bold, fontSize=12, leading=17,
             spaceAfter=6, textColor=colors.HexColor('#2563eb')
         )
         body_style = ParagraphStyle(
             'DocBody', parent=styles['Normal'],
-            fontName=INDIC_FONT_NAME, fontSize=10, leading=15,
-            spaceAfter=4, textColor=colors.HexColor('#334155')
+            fontName=font_reg, fontSize=10.5, leading=16,
+            spaceAfter=4, textColor=colors.HexColor('#1e293b')
         )
         bullet_style = ParagraphStyle(
             'DocBullet', parent=styles['Normal'],
-            fontName=INDIC_FONT_NAME, fontSize=10, leading=15,
-            spaceAfter=3, leftIndent=15, textColor=colors.HexColor('#334155')
+            fontName=font_reg, fontSize=10.5, leading=16,
+            spaceAfter=3, leftIndent=15, textColor=colors.HexColor('#1e293b')
         )
         quote_style = ParagraphStyle(
             'DocQuote', parent=styles['Normal'],
-            fontName=INDIC_FONT_NAME, fontSize=9.5, leading=14,
+            fontName=font_reg, fontSize=10, leading=15,
             spaceAfter=5, leftIndent=20, textColor=colors.HexColor('#475569')
         )
         table_header_style = ParagraphStyle(
             'TH', parent=styles['Normal'],
-            fontName=INDIC_FONT_BOLD, fontSize=9.5, leading=13,
+            fontName=font_bold, fontSize=10, leading=14,
             textColor=colors.white
         )
         table_cell_style = ParagraphStyle(
             'TD', parent=styles['Normal'],
-            fontName=INDIC_FONT_NAME, fontSize=9, leading=13,
+            fontName=font_reg, fontSize=9.5, leading=14,
             textColor=colors.HexColor('#1e293b')
         )
 
@@ -850,9 +882,45 @@ def export_standard_pdf(markdown_text, out_pdf_path=None):
 # Gradio Modern Frontend
 # =====================================================================
 CUSTOM_CSS = """
-#main-title { text-align: center; margin-bottom: 2px; font-weight: 700; }
-#subtitle { text-align: center; color: #4b5563; margin-bottom: 16px; font-size: 1.05em; }
+#main-title { text-align: center; margin-bottom: 2px; font-weight: 700; font-family: 'Times New Roman', Times, serif; }
+#subtitle { text-align: center; color: #4b5563; margin-bottom: 16px; font-size: 1.05em; font-family: 'Times New Roman', Times, serif; }
 .status-box { font-weight: 600; padding: 8px 12px; border-radius: 6px; background: #f3f4f6; }
+
+/* Authentic Times New Roman Typewriting Typography */
+.times-roman-typing,
+#final-output,
+#final-output p,
+#final-output li,
+#final-output td,
+#final-output th,
+#final-output blockquote,
+#final-output div {
+    font-family: 'Times New Roman', Times, 'Nimbus Roman No9 L', serif !important;
+    font-size: 1.15rem !important;
+    line-height: 1.75 !important;
+    color: #0f172a !important;
+    letter-spacing: 0.01em;
+}
+
+#final-output h1,
+#final-output h2,
+#final-output h3 {
+    font-family: 'Times New Roman', Times, serif !important;
+    font-weight: 700 !important;
+    color: #1e3a8a !important;
+}
+
+.typewriter-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    background: #e2e8f0;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-family: 'Times New Roman', Times, serif;
+    font-weight: 600;
+    color: #1e293b;
+    margin-bottom: 6px;
+}
 """
 
 def create_ui():
@@ -967,7 +1035,8 @@ def create_ui():
             with gr.Column(scale=1):
                 with gr.Tabs():
                     with gr.TabItem("🌟 Final Verified Result & PDF Export"):
-                        final_output = gr.Markdown(label="Final Transcription")
+                        gr.HTML("<span class='typewriter-badge'>🖋️ Typing Font: Times New Roman</span>")
+                        final_output = gr.Markdown(label="Final Transcription (Times New Roman Typewriting)", elem_id="final-output", elem_classes=["times-roman-typing"])
                         with gr.Row():
                             download_md_btn = gr.Button("💾 Download as Markdown (.md)", size="sm")
                             download_pdf_btn = gr.Button("📄 Download as Standard PDF (.pdf)", size="sm", variant="primary")
