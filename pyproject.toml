@@ -1,0 +1,8 @@
+[project]
+name = "handwritten-notes-studio"
+version = "1.0.0"
+description = "Universal Handwritten Notes Studio & Bilingual Multimodal API"
+requires-python = ">=3.9"
+
+[tool.vercel]
+entrypoint = "api/index.py"

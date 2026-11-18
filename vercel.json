@@ -4,13 +4,8 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
-    { "source": "/services/mathvision", "destination": "/api/services/mathvision" },
-    { "source": "/services/mmmu", "destination": "/api/services/mmmu" },
-    { "source": "/services/odinw-13", "destination": "/api/services/odinw_13" },
-    { "source": "/services/realworldqa", "destination": "/api/services/realworldqa" },
-    { "source": "/services/videomme", "destination": "/api/services/videomme" },
-    { "source": "/services/qwen-vl-utils", "destination": "/api/services/qwen_vl_utils" },
-    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/services/(.*)", "destination": "/api/index.py" },
+    { "source": "/api/(.*)", "destination": "/api/index.py" },
     { "source": "/", "destination": "/public/index.html" },
     { "source": "/(.*)", "destination": "/public/$1" }
   ],
