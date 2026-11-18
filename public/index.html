@@ -82,6 +82,47 @@
       font-size: 0.85rem;
     }
 
+    .services-nav {
+      background: #090d16;
+      border-bottom: 1px solid var(--card-border);
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+    .service-btn {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.8rem;
+      padding: 5px 10px;
+      border-radius: 6px;
+      border: 1px solid #1e293b;
+      background: #141c2e;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .service-btn:hover, .service-btn.active {
+      color: #fff;
+      border-color: var(--primary);
+      background: #1e293b;
+    }
+    .service-badge-nodb {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid #10b981;
+      color: #34d399;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 4px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
     .container {
       max-width: 1300px;
       margin: 0 auto;
@@ -373,6 +414,17 @@
       <button class="btn-settings" id="btn-settings">⚙️ API Server</button>
     </div>
   </header>
+
+  <div class="services-nav">
+    <span class="service-badge-nodb">🛡️ 100% Stateless & Database-Free</span>
+    <a href="/" class="service-btn active">✍️ Handwritten Studio</a>
+    <a href="/services/mathvision" target="_blank" class="service-btn">📐 MathVision</a>
+    <a href="/services/mmmu" target="_blank" class="service-btn">🧠 MMMU</a>
+    <a href="/services/odinw-13" target="_blank" class="service-btn">🔍 ODinW-13</a>
+    <a href="/services/realworldqa" target="_blank" class="service-btn">🌍 RealWorldQA</a>
+    <a href="/services/videomme" target="_blank" class="service-btn">🎬 VideoMME</a>
+    <a href="/services/qwen-vl-utils" target="_blank" class="service-btn">🛠️ Qwen-VL-Utils</a>
+  </div>
 
   <main class="container">
     <!-- Left Column: Input and Ingestion -->

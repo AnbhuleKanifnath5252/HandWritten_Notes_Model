@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Qwen-VL-Utils Service — Vercel Serverless</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 30px; margin: 0; }
+    .card { max-width: 700px; margin: 40px auto; background: #1e293b; border-radius: 12px; padding: 24px; border: 1px solid #334155; }
+    h1 { color: #06b6d4; font-size: 1.5rem; margin-top: 0; }
+    .badge { display: inline-block; background: #0891b2; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: bold; margin-bottom: 12px; }
+    .pill { display: inline-block; background: #10b981; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: bold; margin-left: 8px; }
+    pre { background: #090d16; padding: 14px; border-radius: 8px; overflow-x: auto; color: #cffafe; }
+    button { background: #0891b2; color: white; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+    button:hover { background: #0e7490; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <span class="badge">Vercel Service</span>
+    <span class="pill">100% Database-Free</span>
+    <h1>🛠️ Qwen-VL-Utils Vision Preprocessor</h1>
+    <p>Stateless microservice deployment for Qwen2.5-VL image and video vision processing utilities.</p>
+    <button onclick="testApi()">⚡ Test API Endpoint (/api/index)</button>
+    <h3>Response:</h3>
+    <pre id="output">Click the button above to test the serverless endpoint.</pre>
+  </div>
+  <script>
+    async function testApi() {
+      const out = document.getElementById('output');
+      out.innerText = "Querying API...";
+      try {
+        const res = await fetch('/api/index');
+        const data = await res.json();
+        out.innerText = JSON.stringify(data, null, 2);
+      } catch (err) {
+        out.innerText = "Error: " + err.message;
+      }
+    }
+  </script>
+</body>
+</html>
