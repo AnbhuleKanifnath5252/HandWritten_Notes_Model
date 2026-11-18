@@ -21,7 +21,7 @@
     <span class="pill">100% Database-Free</span>
     <h1>🔍 ODinW-13 Object Detection in the Wild</h1>
     <p>Stateless microservice deployment for Qwen2.5-VL visual grounding and object detection benchmarking.</p>
-    <button onclick="testApi()">⚡ Test API Endpoint (/api/index)</button>
+    <button onclick="testApi()">⚡ Test API Endpoint (/api/service)</button>
     <h3>Response:</h3>
     <pre id="output">Click the button above to test the serverless endpoint.</pre>
   </div>
@@ -30,7 +30,7 @@
       const out = document.getElementById('output');
       out.innerText = "Querying API...";
       try {
-        const res = await fetch('/api/index');
+        const res = await fetch('/api/service');
         const data = await res.json();
         out.innerText = JSON.stringify(data, null, 2);
       } catch (err) {
