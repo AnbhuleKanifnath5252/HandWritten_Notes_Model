@@ -1,15 +1,2 @@
-vllm
-transformers
-qwen_vl_utils
-pandas
-numpy
-Pillow
-tqdm
-requests
-validators
-torch
-torchvision
-accelerate
-pycocotools
-tabulate
-flash_attn
+# Vercel Serverless Deployment Requirements (Stateless, Database-Free)
+# For local/cluster GPU batch evaluation dependencies, see requirements_gpu_eval.txt

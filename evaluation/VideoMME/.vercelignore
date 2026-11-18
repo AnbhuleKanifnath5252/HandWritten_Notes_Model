@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.sh
+requirements_gpu_eval.txt
+data/
+results/

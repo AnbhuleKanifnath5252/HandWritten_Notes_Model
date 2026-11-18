@@ -1,0 +1,18 @@
+# Heavy AI models and checkpoints
+models/
+*.bin
+*.safetensors
+*.pt
+*.pth
+
+# Mobile app build outputs
+mobile_app/android/
+mobile_app/node_modules/
+
+# Local cache and evaluation data
+__pycache__/
+*.pyc
+evaluation/**/requirements_gpu_eval.txt
+evaluation/**/data/
+evaluation/**/results/
+.git/

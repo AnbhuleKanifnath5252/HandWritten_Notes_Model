@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.sh
+run_mathv.py
+eval_utils.py
+dataset_utils.py
+common_utils.py
+requirements_gpu_eval.txt
+data/
+results/
